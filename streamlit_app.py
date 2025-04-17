@@ -58,7 +58,7 @@ def calculate_center_distance(box1, box2):
 def estimate_distance(area):
     if area > 2000:
         return {"range": "near", "steps": 3}
-    elif area > 500:
+    elif area > 1000:
         return {"range": "medium", "steps": 7}
     else:
         return {"range": "far", "steps": 12}
