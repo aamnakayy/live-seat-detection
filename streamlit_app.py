@@ -1,8 +1,17 @@
 import streamlit as st
 import torch
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image
 import io
 import numpy as np
+from gtts import gTTS
+import os
+
+# Debug: Verify cv2 import
+try:
+    import cv2
+except ImportError as e:
+    st.error(f"Failed to import cv2: {e}")
+    st.stop()
 
 # Load pre-trained YOLOv5 model (yolov5m)
 @st.cache_resource
@@ -13,10 +22,10 @@ def load_model():
 model = load_model()
 
 # Title of the app
-st.title("Live Seat Detection and Navigation App with YOLOv5")
+st.title("Seat Finder for Blind Students")
 
 # Instructions
-st.write("Use your webcam to take a picture, and the app will detect chairs and guide you to the nearest empty seat.")
+st.write("Use your camera to take a picture, and the app will guide you to an empty chair with audio instructions.")
 
 # Camera input widget
 picture = st.camera_input("Take a picture")
@@ -43,6 +52,23 @@ def calculate_center_distance(box1, box2):
     center2_x, center2_y = (x3 + x4) / 2, (y3 + y4) / 2
     return np.sqrt((center1_x - center2_x) ** 2 + (center1_y - center2_y) ** 2)
 
+# Function to estimate distance from bounding box area
+def estimate_distance(area):
+    if area > 2000:
+        return {"range": "near", "steps": 3}
+    elif area > 500:
+        return {"range": "medium", "steps": 7}
+    else:
+        return {"range": "far", "steps": 12}
+
+# Function to generate audio instructions
+def generate_audio(distance_info):
+    message = f"The nearest empty seat is {distance_info['range']}, about {distance_info['steps']} steps ahead. Walk straight and take another picture for an update."
+    tts = gTTS(text=message, lang="en")
+    audio_file = "instructions.mp3"
+    tts.save(audio_file)
+    return audio_file, message
+
 # Process the image with YOLOv5
 if picture is not None:
     # Display the captured image
@@ -50,6 +76,7 @@ if picture is not None:
 
     # Convert Streamlit's BytesIO to PIL Image
     img = Image.open(picture)
+    img_height = img.height  # Get image height for bottom threshold
 
     # Run inference
     results = model(img)
@@ -87,7 +114,48 @@ if picture is not None:
 
         chair_status[chair_idx] = "Occupied" if is_occupied else "Empty"
 
-    # Display chair status
+    # Navigation: Find closest empty chair
+    empty_chairs = []
+    for chair_idx, status in chair_status.items():
+        if status == "Empty":
+            chair = chairs.loc[chair_idx]
+            area = (chair['xmax'] - chair['xmin']) * (chair['ymax'] - chair['ymin'])
+            ymax = chair['ymax']
+            empty_chairs.append({"idx": chair_idx, "area": area, "ymax": ymax, "chair": chair})
+
+    if empty_chairs:
+        # Define bottom threshold (e.g., within 20% of image height from bottom)
+        bottom_threshold = img_height * 0.8
+        # Filter chairs near bottom
+        bottom_chairs = [c for c in empty_chairs if c["ymax"] >= bottom_threshold]
+        
+        if bottom_chairs:
+            # Select chair with largest ymax (closest to bottom)
+            closest_chair = max(bottom_chairs, key=lambda x: x["ymax"])
+        else:
+            # Fallback: Largest area among chairs with highest ymax
+            closest_chair = max(empty_chairs, key=lambda x: (x["ymax"], x["area"]))
+
+        # Estimate distance and generate audio
+        distance_info = estimate_distance(closest_chair["area"])
+        audio_file, message = generate_audio(distance_info)
+        
+        # Display audio and text for accessibility
+        st.audio(audio_file, format="audio/mp3")
+        st.write(message)  # For screen readers
+        st.session_state.last_audio = audio_file
+        st.session_state.last_message = message
+    else:
+        no_seat_message = "No empty seats found. Please try another photo."
+        tts = gTTS(text=no_seat_message, lang="en")
+        audio_file = "no_seats.mp3"
+        tts.save(audio_file)
+        st.audio(audio_file, format="audio/mp3")
+        st.write(no_seat_message)
+        st.session_state.last_audio = audio_file
+        st.session_state.last_message = no_seat_message
+
+    # Display chair status (for debugging or sighted users)
     if not chairs.empty:
         st.write("Chair Status:")
         for chair_idx, status in chair_status.items():
@@ -95,73 +163,28 @@ if picture is not None:
             st.write(f"- Chair at ({int(chair['xmin'])}, {int(chair['ymin'])}): {status} (Confidence: {chair['confidence']:.2f})")
     else:
         st.write("No chairs detected in the image.")
-        st.stop()
 
-    # Find the nearest empty chair
-    # Assume user's position is at the bottom center of the image
-    img_width, img_height = img.size
-    user_position = [img_width / 2, img_height]  # Bottom center
-
-    nearest_empty_chair = None
-    nearest_distance = float('inf')
-    nearest_chair_idx = None
-
-    empty_chairs = {idx: status for idx, status in chair_status.items() if status == "Empty"}
-    for chair_idx in empty_chairs:
-        chair = chairs.loc[chair_idx]
-        chair_center = [(chair['xmin'] + chair['xmax']) / 2, (chair['ymin'] + chair['ymax']) / 2]
-        distance = np.sqrt((chair_center[0] - user_position[0]) ** 2 + (chair_center[1] - user_position[1]) ** 2)
-        if distance < nearest_distance:
-            nearest_distance = distance
-            nearest_empty_chair = chair_center
-            nearest_chair_idx = chair_idx
-
-    # Provide navigation instructions
-    if nearest_empty_chair is not None:
-        st.write("### Navigation Instructions:")
-        dx = nearest_empty_chair[0] - user_position[0]
-        dy = nearest_empty_chair[1] - user_position[1]
-
-        # Determine direction
-        direction = "Move forward"
-        if abs(dx) > img_width * 0.1:  # Threshold for left/right movement
-            if dx > 0:
-                direction += " and slightly right"
-            else:
-                direction += " and slightly left"
-
-        st.write(f"{direction} to reach the nearest empty chair at position ({int(nearest_empty_chair[0])}, {int(nearest_empty_chair[1])}).")
-    else:
-        st.write("No empty chairs detected in the image.")
-        st.stop()
-
-    # Render image with custom labels using PIL
+    # Render image with custom labels
     img_array = np.array(img)  # PIL Image to numpy array (RGB)
-    img = Image.fromarray(img_array)  # Convert back to PIL Image
-    draw = ImageDraw.Draw(img)
-
-    # Try to use a default font, fall back to no font if unavailable
-    try:
-        font = ImageFont.truetype("arial.ttf", 20)
-    except:
-        font = None
-
+    img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)  # Convert RGB to BGR for cv2
     for chair_idx, status in chair_status.items():
         chair = chairs.loc[chair_idx]
         xmin, ymin, xmax, ymax = int(chair['xmin']), int(chair['ymin']), int(chair['xmax']), int(chair['ymax'])
-        # Highlight nearest empty chair in blue, others in green/red
-        if chair_idx == nearest_chair_idx and status == "Empty":
-            color = (0, 0, 255)  # Blue for nearest empty chair
-            label = "Nearest Empty"
-        else:
-            color = (0, 255, 0) if status == "Empty" else (255, 0, 0)  # Green for empty, red for occupied
-            label = status
+        color = (0, 0, 255) if status == "Occupied" else (0, 255, 0)  # Red for occupied, green for empty
+        cv2.rectangle(img_array, (xmin, ymin), (xmax, ymax), color, 2)
+        cv2.putText(img_array, status, (xmin, ymin - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
 
-        # Draw rectangle
-        draw.rectangle([xmin, ymin, xmax, ymax], outline=color, width=2)
-        # Draw text
-        text_position = (xmin, ymin - 30 if ymin >= 30 else ymin + 30)
-        draw.text(text_position, label, fill=color, font=font)
+    # Highlight closest empty chair (if any)
+    if empty_chairs:
+        chair = closest_chair["chair"]
+        xmin, ymin, xmax, ymax = int(chair['xmin']), int(chair['ymin']), int(chair['xmax']), int(chair['ymax'])
+        cv2.putText(img_array, "Closest Empty", (xmin, ymin - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
 
     # Display the image with detections
-    st.image(img, caption="Image with Chair Status and Navigation", use_container_width=True)
+    st.image(cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB), caption="Image with Chair Status", use_container_width=True)
+
+# Repeat last audio instructions
+if "last_audio" in st.session_state:
+    if st.button("Repeat Last Instructions", key="repeat"):
+        st.audio(st.session_state.last_audio, format="audio/mp3")
+        st.write(st.session_state.last_message)

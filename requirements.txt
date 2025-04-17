@@ -4,3 +4,4 @@ yolov5==7.0.14
 pillow==11.1.0
 numpy==2.1.1
 opencv-python-headless==4.11.0.86
+gTTS==2.5.3
