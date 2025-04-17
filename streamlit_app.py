@@ -1,7 +1,6 @@
 import streamlit as st
 import torch
 from PIL import Image
-import io
 import numpy as np
 from gtts import gTTS
 import os
@@ -25,10 +24,10 @@ def load_model():
 model = load_model()
 
 # Title of the app
-st.title("Seat Detection")
+st.title("Seat Finder for Blind Students")
 
 # Instructions
-st.write("The app will automatically detect empty chairs and provide audio instructions. Use the button to start/stop live detection.")
+st.write("Use 'Live Detection' for continuous chair detection or 'Take Picture' for a single photo. Audio instructions will play automatically.")
 
 # Initialize session state
 if "live_detection" not in st.session_state:
@@ -41,13 +40,31 @@ if "last_audio" not in st.session_state:
     st.session_state.last_audio = None
 if "frame_key" not in st.session_state:
     st.session_state.frame_key = 0
+if "mode" not in st.session_state:
+    st.session_state.mode = "photo"  # photo or live
 
-# Toggle live detection
-if st.button("Start/Stop Live Detection", key="toggle_live"):
-    st.session_state.live_detection = not st.session_state.live_detection
+# Mode selection
+col1, col2 = st.columns(2)
+with col1:
+    if st.button("Start Live Detection", key="start_live", disabled=st.session_state.mode == "live"):
+        st.session_state.mode = "live"
+        st.session_state.live_detection = True
+        st.session_state.frame_key = 0
+with col2:
+    if st.button("Use Photo Mode", key="photo_mode", disabled=st.session_state.mode == "photo"):
+        st.session_state.mode = "photo"
+        st.session_state.live_detection = False
+
+# Stop live detection button (only in live mode)
+if st.session_state.mode == "live" and st.session_state.live_detection:
+    if st.button("Stop Live Detection", key="stop_live"):
+        st.session_state.live_detection = False
 
 # Camera input widget
-picture = st.camera_input("Live Feed", key=f"camera_{st.session_state.frame_key}")
+if st.session_state.mode == "live":
+    picture = st.camera_input("Live Feed", key=f"camera_{st.session_state.frame_key}")
+else:
+    picture = st.camera_input("Take a Picture", key="camera_photo")
 
 # Function to calculate Intersection over Union (IoU)
 def calculate_iou(box1, box2):
@@ -90,7 +107,7 @@ def get_direction(chair, img_width):
 
 # Function to generate audio instructions
 def generate_audio(distance_info, direction):
-    message = f"The nearest empty seat is {distance_info['range']}, about {distance_info['steps']} steps ahead {direction}. Walk straight and keep the camera steady."
+    message = f"The nearest empty seat is {distance_info['range']}, about {distance_info['steps']} steps ahead {direction}. {'Keep the camera steady.' if st.session_state.mode == 'live' else 'Take another picture to update.'}"
     tts = gTTS(text=message, lang="en")
     audio_file = f"instructions_{int(time.time())}.mp3"
     tts.save(audio_file)
@@ -109,15 +126,24 @@ def autoplay_audio(audio_file):
     st.markdown(audio_html, unsafe_allow_html=True)
 
 # Process the image with YOLOv5
-if picture is not None and st.session_state.live_detection:
+if picture is not None:
+    # Display the captured image
+    st.image(picture, caption="Captured Frame" if st.session_state.mode == "live" else "Captured Image", use_container_width=True)
+
     # Convert Streamlit's BytesIO to PIL Image
     img = Image.open(picture)
     img_height = img.height  # Get image height for bottom threshold
     img_width = img.width    # Get image width for direction
 
+    # Resize image for faster inference (50% size)
+    img_resized = img.resize((int(img_width * 0.5), int(img_height * 0.5)))
+
     # Run inference
-    results = model(img)
+    results = model(img_resized)
     detections = results.pandas().xyxy[0]
+    # Scale detections back to original image size
+    detections[['xmin', 'xmax']] *= img_width / img_resized.width
+    detections[['ymin', 'ymax']] *= img_height / img_resized.height
 
     # Filter detections
     chairs = detections[detections['name'] == 'chair']
@@ -179,16 +205,33 @@ if picture is not None and st.session_state.live_detection:
         distance_info = estimate_distance(closest_chair["area"])
         audio_file, message = generate_audio(distance_info, direction)
         
-        # Auto-play audio if new instruction (every 3 seconds)
-        if current_time - st.session_state.last_audio_time > 3 or message != st.session_state.last_message:
+        # Auto-play audio if new instruction (every 3 seconds in live mode)
+        if st.session_state.mode == "live":
+            if current_time - st.session_state.last_audio_time > 3 or message != st.session_state.last_message:
+                autoplay_audio(audio_file)
+                st.write(message)  # For screen readers
+                st.session_state.last_audio = audio_file
+                st.session_state.last_message = message
+                st.session_state.last_audio_time = current_time
+        else:
             autoplay_audio(audio_file)
-            st.write(message)  # For screen readers
+            st.write(message)
             st.session_state.last_audio = audio_file
             st.session_state.last_message = message
             st.session_state.last_audio_time = current_time
     else:
         no_seat_message = "No empty seats found. Please adjust the camera."
-        if current_time - st.session_state.last_audio_time > 3 or no_seat_message != st.session_state.last_message:
+        if st.session_state.mode == "live":
+            if current_time - st.session_state.last_audio_time > 3 or no_seat_message != st.session_state.last_message:
+                tts = gTTS(text=no_seat_message, lang="en")
+                audio_file = f"no_seats_{int(time.time())}.mp3"
+                tts.save(audio_file)
+                autoplay_audio(audio_file)
+                st.write(no_seat_message)
+                st.session_state.last_audio = audio_file
+                st.session_state.last_message = no_seat_message
+                st.session_state.last_audio_time = current_time
+        else:
             tts = gTTS(text=no_seat_message, lang="en")
             audio_file = f"no_seats_{int(time.time())}.mp3"
             tts.save(audio_file)
@@ -226,11 +269,13 @@ if picture is not None and st.session_state.live_detection:
             cv2.putText(img_array, f"Closest Empty ({direction})", (xmin, ymin - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
 
         # Display the image with detections
-        st.image(cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB), caption="Live Feed with Chair Status", use_container_width=True)
+        st.image(cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB), caption="Frame with Chair Status" if st.session_state.mode == "live" else "Image with Chair Status", use_container_width=True)
 
-    # Refresh camera input for next frame
-    st.session_state.frame_key += 1
-    st.rerun()
+    # Refresh for next frame in live mode
+    if st.session_state.mode == "live" and st.session_state.live_detection:
+        time.sleep(1)  # Allow audio to play
+        st.session_state.frame_key += 1
+        st.rerun()
 
 # Repeat last audio instructions
 if "last_audio" in st.session_state:
