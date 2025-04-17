@@ -5,13 +5,15 @@ import io
 import numpy as np
 from gtts import gTTS
 import os
+import base64
 
 # Debug: Verify cv2 import
 try:
     import cv2
+    CV2_AVAILABLE = True
 except ImportError as e:
-    st.error(f"Failed to import cv2: {e}")
-    st.stop()
+    st.warning(f"OpenCV import failed: {e}. Visualization disabled, but navigation will work.")
+    CV2_AVAILABLE = False
 
 # Load pre-trained YOLOv5 model (yolov5m)
 @st.cache_resource
@@ -25,7 +27,7 @@ model = load_model()
 st.title("Seat Finder for Blind Students")
 
 # Instructions
-st.write("Use your camera to take a picture, and the app will guide you to an empty chair with audio instructions.")
+st.write("Use your camera to take a picture, and the app will automatically guide you to an empty chair with audio instructions.")
 
 # Camera input widget
 picture = st.camera_input("Take a picture")
@@ -61,13 +63,33 @@ def estimate_distance(area):
     else:
         return {"range": "far", "steps": 12}
 
+# Function to determine direction (left or right)
+def get_direction(chair, img_width):
+    center_x = (chair['xmin'] + chair['xmax']) / 2
+    if center_x < img_width / 2:
+        return "to the left"
+    else:
+        return "to the right"
+
 # Function to generate audio instructions
-def generate_audio(distance_info):
-    message = f"The nearest empty seat is {distance_info['range']}, about {distance_info['steps']} steps ahead. Walk straight and take another picture for an update."
+def generate_audio(distance_info, direction):
+    message = f"The nearest empty seat is {distance_info['range']}, about {distance_info['steps']} steps ahead {direction}. Walk straight and take another picture for an update."
     tts = gTTS(text=message, lang="en")
     audio_file = "instructions.mp3"
     tts.save(audio_file)
     return audio_file, message
+
+# Function to auto-play audio
+def autoplay_audio(audio_file):
+    with open(audio_file, "rb") as f:
+        audio_bytes = f.read()
+    b64 = base64.b64encode(audio_bytes).decode()
+    audio_html = f"""
+    <audio autoplay>
+        <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
+    </audio>
+    """
+    st.markdown(audio_html, unsafe_allow_html=True)
 
 # Process the image with YOLOv5
 if picture is not None:
@@ -77,6 +99,7 @@ if picture is not None:
     # Convert Streamlit's BytesIO to PIL Image
     img = Image.open(picture)
     img_height = img.height  # Get image height for bottom threshold
+    img_width = img.width    # Get image width for direction
 
     # Run inference
     results = model(img)
@@ -124,7 +147,7 @@ if picture is not None:
             empty_chairs.append({"idx": chair_idx, "area": area, "ymax": ymax, "chair": chair})
 
     if empty_chairs:
-        # Define bottom threshold (e.g., within 20% of image height from bottom)
+        # Define bottom threshold (within 20% of image height from bottom)
         bottom_threshold = img_height * 0.8
         # Filter chairs near bottom
         bottom_chairs = [c for c in empty_chairs if c["ymax"] >= bottom_threshold]
@@ -136,12 +159,13 @@ if picture is not None:
             # Fallback: Largest area among chairs with highest ymax
             closest_chair = max(empty_chairs, key=lambda x: (x["ymax"], x["area"]))
 
-        # Estimate distance and generate audio
+        # Get direction and estimate distance
+        direction = get_direction(closest_chair["chair"], img_width)
         distance_info = estimate_distance(closest_chair["area"])
-        audio_file, message = generate_audio(distance_info)
+        audio_file, message = generate_audio(distance_info, direction)
         
-        # Display audio and text for accessibility
-        st.audio(audio_file, format="audio/mp3")
+        # Auto-play audio and display text for accessibility
+        autoplay_audio(audio_file)
         st.write(message)  # For screen readers
         st.session_state.last_audio = audio_file
         st.session_state.last_message = message
@@ -150,7 +174,7 @@ if picture is not None:
         tts = gTTS(text=no_seat_message, lang="en")
         audio_file = "no_seats.mp3"
         tts.save(audio_file)
-        st.audio(audio_file, format="audio/mp3")
+        autoplay_audio(audio_file)
         st.write(no_seat_message)
         st.session_state.last_audio = audio_file
         st.session_state.last_message = no_seat_message
@@ -164,27 +188,30 @@ if picture is not None:
     else:
         st.write("No chairs detected in the image.")
 
-    # Render image with custom labels
-    img_array = np.array(img)  # PIL Image to numpy array (RGB)
-    img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)  # Convert RGB to BGR for cv2
-    for chair_idx, status in chair_status.items():
-        chair = chairs.loc[chair_idx]
-        xmin, ymin, xmax, ymax = int(chair['xmin']), int(chair['ymin']), int(chair['xmax']), int(chair['ymax'])
-        color = (0, 0, 255) if status == "Occupied" else (0, 255, 0)  # Red for occupied, green for empty
-        cv2.rectangle(img_array, (xmin, ymin), (xmax, ymax), color, 2)
-        cv2.putText(img_array, status, (xmin, ymin - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
+    # Render image with custom labels (if OpenCV is available)
+    if CV2_AVAILABLE:
+        img_array = np.array(img)  # PIL Image to numpy array (RGB)
+        img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)  # Convert RGB to BGR for cv2
+        for chair_idx, status in chair_status.items():
+            chair = chairs.loc[chair_idx]
+            xmin, ymin, xmax, ymax = int(chair['xmin']), int(chair['ymin']), int(chair['xmax']), int(chair['ymax'])
+            color = (0, 0, 255) if status == "Occupied" else (0, 255, 0)  # Red for occupied, green for empty
+            cv2.rectangle(img_array, (xmin, ymin), (xmax, ymax), color, 2)
+            cv2.putText(img_array, status, (xmin, ymin - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
 
-    # Highlight closest empty chair (if any)
-    if empty_chairs:
-        chair = closest_chair["chair"]
-        xmin, ymin, xmax, ymax = int(chair['xmin']), int(chair['ymin']), int(chair['xmax']), int(chair['ymax'])
-        cv2.putText(img_array, "Closest Empty", (xmin, ymin - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
+        # Highlight closest empty chair (if any)
+        if empty_chairs:
+            chair = closest_chair["chair"]
+            xmin, ymin, xmax, ymax = int(chair['xmin']), int(chair['ymin']), int(chair['xmax']), int(chair['ymax'])
+            cv2.putText(img_array, f"Closest Empty ({direction})", (xmin, ymin - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
 
-    # Display the image with detections
-    st.image(cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB), caption="Image with Chair Status", use_container_width=True)
+        # Display the image with detections
+        st.image(cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB), caption="Image with Chair Status", use_container_width=True)
+    else:
+        st.write("Image visualization skipped due to OpenCV error.")
 
 # Repeat last audio instructions
 if "last_audio" in st.session_state:
     if st.button("Repeat Last Instructions", key="repeat"):
-        st.audio(st.session_state.last_audio, format="audio/mp3")
+        autoplay_audio(st.session_state.last_audio)
         st.write(st.session_state.last_message)
