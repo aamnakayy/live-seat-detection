@@ -24,7 +24,7 @@ def load_model():
 model = load_model()
 
 # Title of the app
-st.title("Seat Finder for Blind Students")
+st.title("Seat Detection")
 
 # Instructions
 st.write("Use 'Live Detection' for continuous chair detection or 'Take Picture' for a single photo. Audio instructions will play automatically.")
