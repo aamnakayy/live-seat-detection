@@ -27,7 +27,7 @@ model = load_model()
 st.title("Seat Detection")
 
 # Instructions
-st.write("Use 'Live Detection' for continuous chair detection or 'Take Picture' for a single photo. Audio instructions will play automatically.")
+st.write("The app will automatically use your back camera to detect empty chairs every 3 seconds. Click 'Start Live Detection' to begin. If the back camera is not selected, please switch to it in your browser settings.")
 
 # Initialize session state
 if "live_detection" not in st.session_state:
@@ -40,31 +40,14 @@ if "last_audio" not in st.session_state:
     st.session_state.last_audio = None
 if "frame_key" not in st.session_state:
     st.session_state.frame_key = 0
-if "mode" not in st.session_state:
-    st.session_state.mode = "photo"  # photo or live
 
-# Mode selection
-col1, col2 = st.columns(2)
-with col1:
-    if st.button("Start Live Detection", key="start_live", disabled=st.session_state.mode == "live"):
-        st.session_state.mode = "live"
-        st.session_state.live_detection = True
-        st.session_state.frame_key = 0
-with col2:
-    if st.button("Use Photo Mode", key="photo_mode", disabled=st.session_state.mode == "photo"):
-        st.session_state.mode = "photo"
-        st.session_state.live_detection = False
-
-# Stop live detection button (only in live mode)
-if st.session_state.mode == "live" and st.session_state.live_detection:
-    if st.button("Stop Live Detection", key="stop_live"):
-        st.session_state.live_detection = False
+# Start/Stop live detection button
+if st.button("Start/Stop Live Detection", key="toggle_live"):
+    st.session_state.live_detection = not st.session_state.live_detection
+    st.session_state.frame_key = 0  # Reset frame key on toggle
 
 # Camera input widget
-if st.session_state.mode == "live":
-    picture = st.camera_input("Live Feed", key=f"camera_{st.session_state.frame_key}")
-else:
-    picture = st.camera_input("Take a Picture", key="camera_photo")
+picture = st.camera_input("Live Camera Feed", key=f"camera_{st.session_state.frame_key}")
 
 # Function to calculate Intersection over Union (IoU)
 def calculate_iou(box1, box2):
@@ -106,8 +89,8 @@ def get_direction(chair, img_width):
         return "to the right"
 
 # Function to generate audio instructions
-def generate_audio(distance_info, direction):
-    message = f"The nearest empty seat is {distance_info['range']}, about {distance_info['steps']} steps ahead {direction}. {'Keep the camera steady.' if st.session_state.mode == 'live' else 'Take another picture to update.'}"
+def generate_audio(distance_info, direction, area):
+    message = f"The nearest empty seat is {distance_info['range']}, about {distance_info['steps']} steps ahead {direction}. Bounding box area is {int(area)} pixels. Keep the camera steady."
     tts = gTTS(text=message, lang="en")
     audio_file = f"instructions_{int(time.time())}.mp3"
     tts.save(audio_file)
@@ -126,9 +109,9 @@ def autoplay_audio(audio_file):
     st.markdown(audio_html, unsafe_allow_html=True)
 
 # Process the image with YOLOv5
-if picture is not None:
+if picture is not None and st.session_state.live_detection:
     # Display the captured image
-    st.image(picture, caption="Captured Frame" if st.session_state.mode == "live" else "Captured Image", use_container_width=True)
+    st.image(picture, caption="Live Camera Feed", use_container_width=True)
 
     # Convert Streamlit's BytesIO to PIL Image
     img = Image.open(picture)
@@ -139,7 +122,9 @@ if picture is not None:
     img_resized = img.resize((int(img_width * 0.5), int(img_height * 0.5)))
 
     # Run inference
+    start_time = time.time()
     results = model(img_resized)
+    inference_time = time.time() - start_time
     detections = results.pandas().xyxy[0]
     # Scale detections back to original image size
     detections[['xmin', 'xmax']] *= img_width / img_resized.width
@@ -152,8 +137,11 @@ if picture is not None:
 
     # Classify chairs as empty or occupied
     chair_status = {}
+    chair_areas = {}
     for chair_idx, chair in chairs.iterrows():
         chair_box = [chair['xmin'], chair['ymin'], chair['xmax'], chair['ymax']]
+        area = (chair['xmax'] - chair['xmin']) * (chair['ymax'] - chair['ymin'])
+        chair_areas[chair_idx] = area
         is_occupied = False
 
         # Check for person overlap (sitting) or proximity
@@ -182,7 +170,7 @@ if picture is not None:
     for chair_idx, status in chair_status.items():
         if status == "Empty":
             chair = chairs.loc[chair_idx]
-            area = (chair['xmax'] - chair['xmin']) * (chair['ymax'] - chair['ymin'])
+            area = chair_areas[chair_idx]
             ymax = chair['ymax']
             empty_chairs.append({"idx": chair_idx, "area": area, "ymax": ymax, "chair": chair})
 
@@ -203,35 +191,18 @@ if picture is not None:
         # Get direction and estimate distance
         direction = get_direction(closest_chair["chair"], img_width)
         distance_info = estimate_distance(closest_chair["area"])
-        audio_file, message = generate_audio(distance_info, direction)
+        audio_file, message = generate_audio(distance_info, direction, closest_chair["area"])
         
-        # Auto-play audio if new instruction (every 3 seconds in live mode)
-        if st.session_state.mode == "live":
-            if current_time - st.session_state.last_audio_time > 3 or message != st.session_state.last_message:
-                autoplay_audio(audio_file)
-                st.write(message)  # For screen readers
-                st.session_state.last_audio = audio_file
-                st.session_state.last_message = message
-                st.session_state.last_audio_time = current_time
-        else:
+        # Auto-play audio if new instruction (every 3 seconds)
+        if current_time - st.session_state.last_audio_time > 3 or message != st.session_state.last_message:
             autoplay_audio(audio_file)
-            st.write(message)
+            st.write(message)  # For screen readers
             st.session_state.last_audio = audio_file
             st.session_state.last_message = message
             st.session_state.last_audio_time = current_time
     else:
         no_seat_message = "No empty seats found. Please adjust the camera."
-        if st.session_state.mode == "live":
-            if current_time - st.session_state.last_audio_time > 3 or no_seat_message != st.session_state.last_message:
-                tts = gTTS(text=no_seat_message, lang="en")
-                audio_file = f"no_seats_{int(time.time())}.mp3"
-                tts.save(audio_file)
-                autoplay_audio(audio_file)
-                st.write(no_seat_message)
-                st.session_state.last_audio = audio_file
-                st.session_state.last_message = no_seat_message
-                st.session_state.last_audio_time = current_time
-        else:
+        if current_time - st.session_state.last_audio_time > 3 or no_seat_message != st.session_state.last_message:
             tts = gTTS(text=no_seat_message, lang="en")
             audio_file = f"no_seats_{int(time.time())}.mp3"
             tts.save(audio_file)
@@ -241,12 +212,14 @@ if picture is not None:
             st.session_state.last_message = no_seat_message
             st.session_state.last_audio_time = current_time
 
-    # Display chair status (for debugging or sighted users)
+    # Display chair status and bounding box areas
     if not chairs.empty:
-        st.write("Chair Status:")
+        st.write("Chair Status (Bounding Box Areas):")
         for chair_idx, status in chair_status.items():
             chair = chairs.loc[chair_idx]
-            st.write(f"- Chair at ({int(chair['xmin'])}, {int(chair['ymin'])}): {status} (Confidence: {chair['confidence']:.2f})")
+            area = chair_areas[chair_idx]
+            st.write(f"- Chair at ({int(chair['xmin'])}, {int(chair['ymin'])}): {status}, Area: {int(area)} pixels (Confidence: {chair['confidence']:.2f})")
+        st.write(f"Inference time: {inference_time:.2f} seconds")
     else:
         st.write("No chairs detected in the frame.")
 
@@ -259,7 +232,7 @@ if picture is not None:
             xmin, ymin, xmax, ymax = int(chair['xmin']), int(chair['ymin']), int(chair['xmax']), int(chair['ymax'])
             color = (0, 0, 255) if status == "Occupied" else (0, 255, 0)  # Red for occupied, green for empty
             cv2.rectangle(img_array, (xmin, ymin), (xmax, ymax), color, 2)
-            cv2.putText(img_array, status, (xmin, ymin - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
+            cv2.putText(img_array, f"{status}, Area: {int(chair_areas[chair_idx])}", (xmin, ymin - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
 
         # Highlight closest empty chair (if any)
         if empty_chairs:
@@ -269,10 +242,12 @@ if picture is not None:
             cv2.putText(img_array, f"Closest Empty ({direction})", (xmin, ymin - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
 
         # Display the image with detections
-        st.image(cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB), caption="Frame with Chair Status" if st.session_state.mode == "live" else "Image with Chair Status", use_container_width=True)
+        st.image(cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB), caption="Live Feed with Chair Status", use_container_width=True)
+    else:
+        st.write("Image visualization skipped due to OpenCV error.")
 
-    # Refresh for next frame in live mode
-    if st.session_state.mode == "live" and st.session_state.live_detection:
+    # Refresh for next frame if live detection is active
+    if st.session_state.live_detection:
         time.sleep(1)  # Allow audio to play
         st.session_state.frame_key += 1
         st.rerun()
