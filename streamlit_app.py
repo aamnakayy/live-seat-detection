@@ -27,7 +27,7 @@ model = load_model()
 st.title("Seat Finder for Blind Students")
 
 # Instructions
-st.write("Click 'Start Live Detection' to open your back camera and detect empty chairs every 3 seconds. If the back camera is not selected, switch to it in your browser settings.")
+st.write("Click 'Start Live Detection' to open your back camera and detect empty chairs every 3 seconds. If the back camera is not selected, switch to it in your browser settings or allow camera permissions.")
 
 # Initialize session state
 if "live_detection" not in st.session_state:
@@ -48,12 +48,17 @@ if st.button("Start/Stop Live Detection", key="toggle_live"):
     st.session_state.live_detection = not st.session_state.live_detection
     st.session_state.frame_key = 0
     st.session_state.last_frame_time = time.time()
+    st.rerun()  # Force rerender to update camera state
+
+# Debug: Display live detection status
+st.write(f"Live Detection: {'Active' if st.session_state.live_detection else 'Inactive'}")
 
 # Camera input widget (only render when live detection is active)
 if st.session_state.live_detection:
     picture = st.camera_input("Live Camera Feed", key=f"camera_{st.session_state.frame_key}")
 else:
     st.write("Camera is off. Click 'Start Live Detection' to begin.")
+    picture = None
 
 # Function to calculate Intersection over Union (IoU)
 def calculate_iou(box1, box2):
@@ -115,7 +120,7 @@ def autoplay_audio(audio_file):
     st.markdown(audio_html, unsafe_allow_html=True)
 
 # Process the image with YOLOv5
-if picture is not None and st.session_state.live_detection:
+if st.session_state.live_detection and picture is not None:
     # Display the captured image
     st.image(picture, caption="Live Camera Feed", use_container_width=True)
 
@@ -253,13 +258,12 @@ if picture is not None and st.session_state.live_detection:
         st.write("Image visualization skipped due to OpenCV error.")
 
     # Refresh for next frame if live detection is active (every 3 seconds)
-    if st.session_state.live_detection:
-        current_time = time.time()
-        if current_time - st.session_state.last_frame_time >= 3:
-            time.sleep(1)  # Allow audio to play
-            st.session_state.frame_key += 1
-            st.session_state.last_frame_time = current_time
-            st.rerun()
+    current_time = time.time()
+    if current_time - st.session_state.last_frame_time >= 3:
+        time.sleep(1)  # Allow audio to play
+        st.session_state.frame_key += 1
+        st.session_state.last_frame_time = current_time
+        st.rerun()
 
 # Repeat last audio instructions (only show if instructions exist)
 if st.session_state.last_audio is not None:
