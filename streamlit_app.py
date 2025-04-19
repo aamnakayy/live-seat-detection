@@ -24,10 +24,10 @@ def load_model():
 model = load_model()
 
 # Title of the app
-st.title("Seat Detection")
+st.title("Seat Finder for Blind Students")
 
 # Instructions
-st.write("The app will automatically use your back camera to detect empty chairs every 3 seconds. Click 'Start Live Detection' to begin. If the back camera is not selected, please switch to it in your browser settings.")
+st.write("Click 'Start Live Detection' to open your back camera and detect empty chairs every 3 seconds. If the back camera is not selected, switch to it in your browser settings.")
 
 # Initialize session state
 if "live_detection" not in st.session_state:
@@ -40,14 +40,20 @@ if "last_audio" not in st.session_state:
     st.session_state.last_audio = None
 if "frame_key" not in st.session_state:
     st.session_state.frame_key = 0
+if "last_frame_time" not in st.session_state:
+    st.session_state.last_frame_time = 0
 
 # Start/Stop live detection button
 if st.button("Start/Stop Live Detection", key="toggle_live"):
     st.session_state.live_detection = not st.session_state.live_detection
-    st.session_state.frame_key = 0  # Reset frame key on toggle
+    st.session_state.frame_key = 0
+    st.session_state.last_frame_time = time.time()
 
-# Camera input widget
-picture = st.camera_input("Live Camera Feed", key=f"camera_{st.session_state.frame_key}")
+# Camera input widget (only render when live detection is active)
+if st.session_state.live_detection:
+    picture = st.camera_input("Live Camera Feed", key=f"camera_{st.session_state.frame_key}")
+else:
+    st.write("Camera is off. Click 'Start Live Detection' to begin.")
 
 # Function to calculate Intersection over Union (IoU)
 def calculate_iou(box1, box2):
@@ -246,14 +252,17 @@ if picture is not None and st.session_state.live_detection:
     else:
         st.write("Image visualization skipped due to OpenCV error.")
 
-    # Refresh for next frame if live detection is active
+    # Refresh for next frame if live detection is active (every 3 seconds)
     if st.session_state.live_detection:
-        time.sleep(1)  # Allow audio to play
-        st.session_state.frame_key += 1
-        st.rerun()
+        current_time = time.time()
+        if current_time - st.session_state.last_frame_time >= 3:
+            time.sleep(1)  # Allow audio to play
+            st.session_state.frame_key += 1
+            st.session_state.last_frame_time = current_time
+            st.rerun()
 
-# Repeat last audio instructions
-if "last_audio" in st.session_state:
+# Repeat last audio instructions (only show if instructions exist)
+if st.session_state.last_audio is not None:
     if st.button("Repeat Last Instructions", key="repeat"):
         autoplay_audio(st.session_state.last_audio)
         st.write(st.session_state.last_message)
