@@ -1,11 +1,11 @@
 import streamlit as st
 import torch
 from PIL import Image
+import io
 import numpy as np
 from gtts import gTTS
 import os
 import base64
-import time
 
 # Debug: Verify cv2 import
 try:
@@ -15,10 +15,10 @@ except ImportError as e:
     st.warning(f"OpenCV import failed: {e}. Visualization disabled, but navigation will work.")
     CV2_AVAILABLE = False
 
-# Load pre-trained YOLOv5 model (yolov5s for faster inference)
+# Load pre-trained YOLOv5 model (yolov5m)
 @st.cache_resource
 def load_model():
-    model = torch.hub.load("ultralytics/yolov5", "yolov5s", pretrained=True)
+    model = torch.hub.load("ultralytics/yolov5", "yolov5m", pretrained=True)
     return model
 
 model = load_model()
@@ -27,16 +27,10 @@ model = load_model()
 st.title("Seat Finder for Blind Students")
 
 # Instructions
-st.write("The app uses your back camera to detect empty chairs. Take a picture to get audio instructions. If the back camera is not selected, switch to it in your browser settings or allow camera permissions.")
+st.write("Use your camera to take a picture, and the app will automatically guide you to an empty chair with audio instructions.")
 
-# Initialize session state
-if "last_audio" not in st.session_state:
-    st.session_state.last_audio = None
-if "last_message" not in st.session_state:
-    st.session_state.last_message = ""
-
-# Camera input
-picture = st.camera_input("Camera Feed", key="camera")
+# Camera input widget
+picture = st.camera_input("Take a picture")
 
 # Function to calculate Intersection over Union (IoU)
 def calculate_iou(box1, box2):
@@ -64,7 +58,7 @@ def calculate_center_distance(box1, box2):
 def estimate_distance(area):
     if area > 2000:
         return {"range": "near", "steps": 3}
-    elif area > 500:
+    elif area > 1000:
         return {"range": "medium", "steps": 7}
     else:
         return {"range": "far", "steps": 12}
@@ -78,10 +72,10 @@ def get_direction(chair, img_width):
         return "to the right"
 
 # Function to generate audio instructions
-def generate_audio(distance_info, direction, area):
-    message = f"The nearest empty seat is {distance_info['range']}, about {distance_info['steps']} steps ahead {direction}. Bounding box area is {int(area)} pixels. Take another picture to update."
+def generate_audio(distance_info, direction):
+    message = f"The nearest empty seat is {distance_info['range']}, about {distance_info['steps']} steps ahead {direction}. Walk straight and take another picture for an update."
     tts = gTTS(text=message, lang="en")
-    audio_file = f"instructions_{int(time.time())}.mp3"
+    audio_file = "instructions.mp3"
     tts.save(audio_file)
     return audio_file, message
 
@@ -104,20 +98,12 @@ if picture is not None:
 
     # Convert Streamlit's BytesIO to PIL Image
     img = Image.open(picture)
-    img_height = img.height
-    img_width = img.width
-
-    # Resize image for faster inference (50% size)
-    img_resized = img.resize((int(img_width * 0.5), int(img_height * 0.5)))
+    img_height = img.height  # Get image height for bottom threshold
+    img_width = img.width    # Get image width for direction
 
     # Run inference
-    start_time = time.time()
-    results = model(img_resized)
-    inference_time = time.time() - start_time
+    results = model(img)
     detections = results.pandas().xyxy[0]
-    # Scale detections back to original image size
-    detections[['xmin', 'xmax']] *= img_width / img_resized.width
-    detections[['ymin', 'ymax']] *= img_height / img_resized.height
 
     # Filter detections
     chairs = detections[detections['name'] == 'chair']
@@ -126,14 +112,11 @@ if picture is not None:
 
     # Classify chairs as empty or occupied
     chair_status = {}
-    chair_areas = {}
     for chair_idx, chair in chairs.iterrows():
         chair_box = [chair['xmin'], chair['ymin'], chair['xmax'], chair['ymax']]
-        area = (chair['xmax'] - chair['xmin']) * (chair['ymax'] - chair['ymin'])
-        chair_areas[chair_idx] = area
         is_occupied = False
 
-        # Check for person overlap or proximity
+        # Check for person overlap (sitting) or proximity
         for _, person in people.iterrows():
             person_box = [person['xmin'], person['ymin'], person['xmax'], person['ymax']]
             iou = calculate_iou(chair_box, person_box)
@@ -159,7 +142,7 @@ if picture is not None:
     for chair_idx, status in chair_status.items():
         if status == "Empty":
             chair = chairs.loc[chair_idx]
-            area = chair_areas[chair_idx]
+            area = (chair['xmax'] - chair['xmin']) * (chair['ymax'] - chair['ymin'])
             ymax = chair['ymax']
             empty_chairs.append({"idx": chair_idx, "area": area, "ymax": ymax, "chair": chair})
 
@@ -179,33 +162,31 @@ if picture is not None:
         # Get direction and estimate distance
         direction = get_direction(closest_chair["chair"], img_width)
         distance_info = estimate_distance(closest_chair["area"])
-        audio_file, message = generate_audio(distance_info, direction, closest_chair["area"])
+        audio_file, message = generate_audio(distance_info, direction)
         
-        # Auto-play audio
+        # Auto-play audio and display text for accessibility
         autoplay_audio(audio_file)
         st.write(message)  # For screen readers
         st.session_state.last_audio = audio_file
         st.session_state.last_message = message
     else:
-        no_seat_message = "No empty seats found. Please take another picture."
+        no_seat_message = "No empty seats found. Please try another photo."
         tts = gTTS(text=no_seat_message, lang="en")
-        audio_file = f"no_seats_{int(time.time())}.mp3"
+        audio_file = "no_seats.mp3"
         tts.save(audio_file)
         autoplay_audio(audio_file)
         st.write(no_seat_message)
         st.session_state.last_audio = audio_file
         st.session_state.last_message = no_seat_message
 
-    # Display chair status and bounding box areas
+    # Display chair status (for debugging or sighted users)
     if not chairs.empty:
-        st.write("Chair Status (Bounding Box Areas):")
+        st.write("Chair Status:")
         for chair_idx, status in chair_status.items():
             chair = chairs.loc[chair_idx]
-            area = chair_areas[chair_idx]
-            st.write(f"- Chair at ({int(chair['xmin'])}, {int(chair['ymin'])}): {status}, Area: {int(area)} pixels (Confidence: {chair['confidence']:.2f})")
-        st.write(f"Inference time: {inference_time:.2f} seconds")
+            st.write(f"- Chair at ({int(chair['xmin'])}, {int(chair['ymin'])}): {status} (Confidence: {chair['confidence']:.2f})")
     else:
-        st.write("No chairs detected in the frame.")
+        st.write("No chairs detected in the image.")
 
     # Render image with custom labels (if OpenCV is available)
     if CV2_AVAILABLE:
@@ -216,12 +197,11 @@ if picture is not None:
             xmin, ymin, xmax, ymax = int(chair['xmin']), int(chair['ymin']), int(chair['xmax']), int(chair['ymax'])
             color = (0, 0, 255) if status == "Occupied" else (0, 255, 0)  # Red for occupied, green for empty
             cv2.rectangle(img_array, (xmin, ymin), (xmax, ymax), color, 2)
-            cv2.putText(img_array, f"{status}, Area: {int(chair_areas[chair_idx])}", (xmin, ymin - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
+            cv2.putText(img_array, status, (xmin, ymin - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
 
         # Highlight closest empty chair (if any)
         if empty_chairs:
             chair = closest_chair["chair"]
-            direction = get_direction(chair, img_width)
             xmin, ymin, xmax, ymax = int(chair['xmin']), int(chair['ymin']), int(chair['xmax']), int(chair['ymax'])
             cv2.putText(img_array, f"Closest Empty ({direction})", (xmin, ymin - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
 
@@ -230,8 +210,8 @@ if picture is not None:
     else:
         st.write("Image visualization skipped due to OpenCV error.")
 
-# Repeat last audio instructions (only show if instructions exist)
-if st.session_state.last_audio is not None:
+# Repeat last audio instructions
+if "last_audio" in st.session_state:
     if st.button("Repeat Last Instructions", key="repeat"):
         autoplay_audio(st.session_state.last_audio)
         st.write(st.session_state.last_message)
