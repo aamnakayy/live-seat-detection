@@ -27,32 +27,16 @@ model = load_model()
 st.title("Seat Finder for Blind Students")
 
 # Instructions
-st.write("The app uses your back camera to detect empty chairs every 3 seconds. If the back camera is not selected, switch to it in your browser settings or allow camera permissions. Click 'Take Picture' for a manual capture.")
+st.write("The app uses your back camera to detect empty chairs. Take a picture to get audio instructions. If the back camera is not selected, switch to it in your browser settings or allow camera permissions.")
 
 # Initialize session state
-if "last_audio_time" not in st.session_state:
-    st.session_state.last_audio_time = 0
-if "last_message" not in st.session_state:
-    st.session_state.last_message = ""
 if "last_audio" not in st.session_state:
     st.session_state.last_audio = None
-if "frame_key" not in st.session_state:
-    st.session_state.frame_key = 0
-if "last_frame_time" not in st.session_state:
-    st.session_state.last_frame_time = time.time()
-if "manual_capture" not in st.session_state:
-    st.session_state.manual_capture = False
-if "manual_picture" not in st.session_state:
-    st.session_state.manual_picture = None
+if "last_message" not in st.session_state:
+    st.session_state.last_message = ""
 
-# Camera input for live detection
-live_picture = st.camera_input("Live Camera Feed", key=f"live_camera_{st.session_state.frame_key}")
-
-# Manual capture button and input
-if st.button("Take Picture", key="manual_capture"):
-    st.session_state.manual_capture = True
-    st.session_state.manual_picture = None  # Reset for new capture
-manual_picture = st.camera_input("Manual Capture", key="manual_camera", disabled=not st.session_state.manual_capture)
+# Camera input
+picture = st.camera_input("Camera Feed", key="camera")
 
 # Function to calculate Intersection over Union (IoU)
 def calculate_iou(box1, box2):
@@ -94,8 +78,8 @@ def get_direction(chair, img_width):
         return "to the right"
 
 # Function to generate audio instructions
-def generate_audio(distance_info, direction, area, is_manual=False):
-    message = f"The nearest empty seat is {distance_info['range']}, about {distance_info['steps']} steps ahead {direction}. Bounding box area is {int(area)} pixels. {'Keep the camera steady.' if not is_manual else 'Take another picture to update.'}"
+def generate_audio(distance_info, direction, area):
+    message = f"The nearest empty seat is {distance_info['range']}, about {distance_info['steps']} steps ahead {direction}. Bounding box area is {int(area)} pixels. Take another picture to update."
     tts = gTTS(text=message, lang="en")
     audio_file = f"instructions_{int(time.time())}.mp3"
     tts.save(audio_file)
@@ -114,17 +98,14 @@ def autoplay_audio(audio_file):
     st.markdown(audio_html, unsafe_allow_html=True)
 
 # Process the image with YOLOv5
-def process_image(picture, is_manual=False):
-    if picture is None:
-        return
-
+if picture is not None:
     # Display the captured image
-    st.image(picture, caption="Manual Capture" if is_manual else "Live Camera Feed", use_container_width=True)
+    st.image(picture, caption="Captured Image", use_container_width=True)
 
     # Convert Streamlit's BytesIO to PIL Image
     img = Image.open(picture)
-    img_height = img.height  # Get image height for bottom threshold
-    img_width = img.width    # Get image width for direction
+    img_height = img.height
+    img_width = img.width
 
     # Resize image for faster inference (50% size)
     img_resized = img.resize((int(img_width * 0.5), int(img_height * 0.5)))
@@ -152,7 +133,7 @@ def process_image(picture, is_manual=False):
         chair_areas[chair_idx] = area
         is_occupied = False
 
-        # Check for person overlap (sitting) or proximity
+        # Check for person overlap or proximity
         for _, person in people.iterrows():
             person_box = [person['xmin'], person['ymin'], person['xmax'], person['ymax']]
             iou = calculate_iou(chair_box, person_box)
@@ -182,7 +163,6 @@ def process_image(picture, is_manual=False):
             ymax = chair['ymax']
             empty_chairs.append({"idx": chair_idx, "area": area, "ymax": ymax, "chair": chair})
 
-    current_time = time.time()
     if empty_chairs:
         # Define bottom threshold (within 20% of image height from bottom)
         bottom_threshold = img_height * 0.8
@@ -199,26 +179,22 @@ def process_image(picture, is_manual=False):
         # Get direction and estimate distance
         direction = get_direction(closest_chair["chair"], img_width)
         distance_info = estimate_distance(closest_chair["area"])
-        audio_file, message = generate_audio(distance_info, direction, closest_chair["area"], is_manual)
+        audio_file, message = generate_audio(distance_info, direction, closest_chair["area"])
         
-        # Auto-play audio if new instruction (every 3 seconds for live)
-        if is_manual or (current_time - st.session_state.last_audio_time > 3 and message != st.session_state.last_message):
-            autoplay_audio(audio_file)
-            st.write(message)  # For screen readers
-            st.session_state.last_audio = audio_file
-            st.session_state.last_message = message
-            st.session_state.last_audio_time = current_time
+        # Auto-play audio
+        autoplay_audio(audio_file)
+        st.write(message)  # For screen readers
+        st.session_state.last_audio = audio_file
+        st.session_state.last_message = message
     else:
-        no_seat_message = "No empty seats found. Please adjust the camera."
-        if is_manual or (current_time - st.session_state.last_audio_time > 3 and no_seat_message != st.session_state.last_message):
-            tts = gTTS(text=no_seat_message, lang="en")
-            audio_file = f"no_seats_{int(time.time())}.mp3"
-            tts.save(audio_file)
-            autoplay_audio(audio_file)
-            st.write(no_seat_message)
-            st.session_state.last_audio = audio_file
-            st.session_state.last_message = no_seat_message
-            st.session_state.last_audio_time = current_time
+        no_seat_message = "No empty seats found. Please take another picture."
+        tts = gTTS(text=no_seat_message, lang="en")
+        audio_file = f"no_seats_{int(time.time())}.mp3"
+        tts.save(audio_file)
+        autoplay_audio(audio_file)
+        st.write(no_seat_message)
+        st.session_state.last_audio = audio_file
+        st.session_state.last_message = no_seat_message
 
     # Display chair status and bounding box areas
     if not chairs.empty:
@@ -250,24 +226,9 @@ def process_image(picture, is_manual=False):
             cv2.putText(img_array, f"Closest Empty ({direction})", (xmin, ymin - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
 
         # Display the image with detections
-        st.image(cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB), caption="Manual Capture with Chair Status" if is_manual else "Live Feed with Chair Status", use_container_width=True)
+        st.image(cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB), caption="Image with Chair Status", use_container_width=True)
     else:
         st.write("Image visualization skipped due to OpenCV error.")
-
-# Process live or manual capture
-if st.session_state.manual_capture and manual_picture is not None:
-    process_image(manual_picture, is_manual=True)
-    st.session_state.manual_picture = manual_picture  # Persist for display
-elif live_picture is not None:
-    process_image(live_picture, is_manual=False)
-
-# Auto-capture for live detection
-current_time = time.time()
-if live_picture is not None and current_time - st.session_state.last_frame_time >= 3:
-    time.sleep(1)  # Allow audio to play
-    st.session_state.frame_key += 1
-    st.session_state.last_frame_time = current_time
-    st.rerun()
 
 # Repeat last audio instructions (only show if instructions exist)
 if st.session_state.last_audio is not None:
