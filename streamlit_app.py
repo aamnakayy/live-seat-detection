@@ -27,11 +27,9 @@ model = load_model()
 st.title("Seat Finder for Blind Students")
 
 # Instructions
-st.write("Click 'Start Live Detection' to open your back camera and detect empty chairs every 3 seconds. If the back camera is not selected, switch to it in your browser settings or allow camera permissions.")
+st.write("The app uses your back camera to detect empty chairs every 3 seconds. If the back camera is not selected, switch to it in your browser settings or allow camera permissions. Click 'Take Picture' for a manual capture.")
 
 # Initialize session state
-if "live_detection" not in st.session_state:
-    st.session_state.live_detection = False
 if "last_audio_time" not in st.session_state:
     st.session_state.last_audio_time = 0
 if "last_message" not in st.session_state:
@@ -41,24 +39,20 @@ if "last_audio" not in st.session_state:
 if "frame_key" not in st.session_state:
     st.session_state.frame_key = 0
 if "last_frame_time" not in st.session_state:
-    st.session_state.last_frame_time = 0
-
-# Start/Stop live detection button
-if st.button("Start/Stop Live Detection", key="toggle_live"):
-    st.session_state.live_detection = not st.session_state.live_detection
-    st.session_state.frame_key = 0
     st.session_state.last_frame_time = time.time()
-    st.rerun()  # Force rerender to update camera state
+if "manual_capture" not in st.session_state:
+    st.session_state.manual_capture = False
+if "manual_picture" not in st.session_state:
+    st.session_state.manual_picture = None
 
-# Debug: Display live detection status
-st.write(f"Live Detection: {'Active' if st.session_state.live_detection else 'Inactive'}")
+# Camera input for live detection
+live_picture = st.camera_input("Live Camera Feed", key=f"live_camera_{st.session_state.frame_key}")
 
-# Camera input widget (only render when live detection is active)
-if st.session_state.live_detection:
-    picture = st.camera_input("Live Camera Feed", key=f"camera_{st.session_state.frame_key}")
-else:
-    st.write("Camera is off. Click 'Start Live Detection' to begin.")
-    picture = None
+# Manual capture button and input
+if st.button("Take Picture", key="manual_capture"):
+    st.session_state.manual_capture = True
+    st.session_state.manual_picture = None  # Reset for new capture
+manual_picture = st.camera_input("Manual Capture", key="manual_camera", disabled=not st.session_state.manual_capture)
 
 # Function to calculate Intersection over Union (IoU)
 def calculate_iou(box1, box2):
@@ -100,8 +94,8 @@ def get_direction(chair, img_width):
         return "to the right"
 
 # Function to generate audio instructions
-def generate_audio(distance_info, direction, area):
-    message = f"The nearest empty seat is {distance_info['range']}, about {distance_info['steps']} steps ahead {direction}. Bounding box area is {int(area)} pixels. Keep the camera steady."
+def generate_audio(distance_info, direction, area, is_manual=False):
+    message = f"The nearest empty seat is {distance_info['range']}, about {distance_info['steps']} steps ahead {direction}. Bounding box area is {int(area)} pixels. {'Keep the camera steady.' if not is_manual else 'Take another picture to update.'}"
     tts = gTTS(text=message, lang="en")
     audio_file = f"instructions_{int(time.time())}.mp3"
     tts.save(audio_file)
@@ -120,9 +114,12 @@ def autoplay_audio(audio_file):
     st.markdown(audio_html, unsafe_allow_html=True)
 
 # Process the image with YOLOv5
-if st.session_state.live_detection and picture is not None:
+def process_image(picture, is_manual=False):
+    if picture is None:
+        return
+
     # Display the captured image
-    st.image(picture, caption="Live Camera Feed", use_container_width=True)
+    st.image(picture, caption="Manual Capture" if is_manual else "Live Camera Feed", use_container_width=True)
 
     # Convert Streamlit's BytesIO to PIL Image
     img = Image.open(picture)
@@ -202,10 +199,10 @@ if st.session_state.live_detection and picture is not None:
         # Get direction and estimate distance
         direction = get_direction(closest_chair["chair"], img_width)
         distance_info = estimate_distance(closest_chair["area"])
-        audio_file, message = generate_audio(distance_info, direction, closest_chair["area"])
+        audio_file, message = generate_audio(distance_info, direction, closest_chair["area"], is_manual)
         
-        # Auto-play audio if new instruction (every 3 seconds)
-        if current_time - st.session_state.last_audio_time > 3 or message != st.session_state.last_message:
+        # Auto-play audio if new instruction (every 3 seconds for live)
+        if is_manual or (current_time - st.session_state.last_audio_time > 3 and message != st.session_state.last_message):
             autoplay_audio(audio_file)
             st.write(message)  # For screen readers
             st.session_state.last_audio = audio_file
@@ -213,7 +210,7 @@ if st.session_state.live_detection and picture is not None:
             st.session_state.last_audio_time = current_time
     else:
         no_seat_message = "No empty seats found. Please adjust the camera."
-        if current_time - st.session_state.last_audio_time > 3 or no_seat_message != st.session_state.last_message:
+        if is_manual or (current_time - st.session_state.last_audio_time > 3 and no_seat_message != st.session_state.last_message):
             tts = gTTS(text=no_seat_message, lang="en")
             audio_file = f"no_seats_{int(time.time())}.mp3"
             tts.save(audio_file)
@@ -253,17 +250,24 @@ if st.session_state.live_detection and picture is not None:
             cv2.putText(img_array, f"Closest Empty ({direction})", (xmin, ymin - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
 
         # Display the image with detections
-        st.image(cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB), caption="Live Feed with Chair Status", use_container_width=True)
+        st.image(cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB), caption="Manual Capture with Chair Status" if is_manual else "Live Feed with Chair Status", use_container_width=True)
     else:
         st.write("Image visualization skipped due to OpenCV error.")
 
-    # Refresh for next frame if live detection is active (every 3 seconds)
-    current_time = time.time()
-    if current_time - st.session_state.last_frame_time >= 3:
-        time.sleep(1)  # Allow audio to play
-        st.session_state.frame_key += 1
-        st.session_state.last_frame_time = current_time
-        st.rerun()
+# Process live or manual capture
+if st.session_state.manual_capture and manual_picture is not None:
+    process_image(manual_picture, is_manual=True)
+    st.session_state.manual_picture = manual_picture  # Persist for display
+elif live_picture is not None:
+    process_image(live_picture, is_manual=False)
+
+# Auto-capture for live detection
+current_time = time.time()
+if live_picture is not None and current_time - st.session_state.last_frame_time >= 3:
+    time.sleep(1)  # Allow audio to play
+    st.session_state.frame_key += 1
+    st.session_state.last_frame_time = current_time
+    st.rerun()
 
 # Repeat last audio instructions (only show if instructions exist)
 if st.session_state.last_audio is not None:
