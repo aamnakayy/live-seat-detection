@@ -6,7 +6,7 @@ import numpy as np
 from gtts import gTTS
 import os
 import base64
-import time  # Added to fix NameError
+import time
 
 # Debug: Verify cv2 import
 try:
@@ -76,7 +76,7 @@ def get_direction(chair, img_width):
 def generate_audio(distance_info, direction, area):
     message = f"The nearest empty seat is {distance_info['range']}, about {distance_info['steps']} steps ahead {direction}. Bounding box area is {int(area)} pixels. Walk straight and take another picture for an update."
     tts = gTTS(text=message, lang="en")
-    audio_file = f"instructions_{int(time.time())}.mp3"  # Unique filename to avoid conflicts
+    audio_file = f"instructions_{int(time.time())}.mp3"
     tts.save(audio_file)
     return audio_file, message
 
@@ -212,7 +212,7 @@ if picture is not None:
             cv2.putText(img_array, f"Closest Empty ({direction})", (xmin, ymin - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
 
         # Display the image with detections
-        st.image(cv2.cvtColor(img_array, CV2.COLOR_BGR2RGB), caption="Image with Chair Status", use_container_width=True)
+        st.image(cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB), caption="Image with Chair Status", use_container_width=True)
     else:
         st.write("Image visualization skipped due to OpenCV error.")
 
