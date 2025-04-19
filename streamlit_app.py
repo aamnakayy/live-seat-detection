@@ -72,10 +72,10 @@ def get_direction(chair, img_width):
         return "to the right"
 
 # Function to generate audio instructions
-def generate_audio(distance_info, direction):
-    message = f"The nearest empty seat is {distance_info['range']}, about {distance_info['steps']} steps ahead {direction}. Walk straight and take another picture for an update."
+def generate_audio(distance_info, direction, area):
+    message = f"The nearest empty seat is {distance_info['range']}, about {distance_info['steps']} steps ahead {direction}. Bounding box area is {int(area)} pixels. Walk straight and take another picture for an update."
     tts = gTTS(text=message, lang="en")
-    audio_file = "instructions.mp3"
+    audio_file = f"instructions_{int(time.time())}.mp3"  # Unique filename to avoid conflicts
     tts.save(audio_file)
     return audio_file, message
 
@@ -112,8 +112,11 @@ if picture is not None:
 
     # Classify chairs as empty or occupied
     chair_status = {}
+    chair_areas = {}
     for chair_idx, chair in chairs.iterrows():
         chair_box = [chair['xmin'], chair['ymin'], chair['xmax'], chair['ymax']]
+        area = (chair['xmax'] - chair['xmin']) * (chair['ymax'] - chair['ymin'])
+        chair_areas[chair_idx] = area
         is_occupied = False
 
         # Check for person overlap (sitting) or proximity
@@ -142,7 +145,7 @@ if picture is not None:
     for chair_idx, status in chair_status.items():
         if status == "Empty":
             chair = chairs.loc[chair_idx]
-            area = (chair['xmax'] - chair['xmin']) * (chair['ymax'] - chair['ymin'])
+            area = chair_areas[chair_idx]
             ymax = chair['ymax']
             empty_chairs.append({"idx": chair_idx, "area": area, "ymax": ymax, "chair": chair})
 
@@ -162,7 +165,7 @@ if picture is not None:
         # Get direction and estimate distance
         direction = get_direction(closest_chair["chair"], img_width)
         distance_info = estimate_distance(closest_chair["area"])
-        audio_file, message = generate_audio(distance_info, direction)
+        audio_file, message = generate_audio(distance_info, direction, closest_chair["area"])
         
         # Auto-play audio and display text for accessibility
         autoplay_audio(audio_file)
@@ -172,19 +175,20 @@ if picture is not None:
     else:
         no_seat_message = "No empty seats found. Please try another photo."
         tts = gTTS(text=no_seat_message, lang="en")
-        audio_file = "no_seats.mp3"
+        audio_file = f"no_seats_{int(time.time())}.mp3"
         tts.save(audio_file)
         autoplay_audio(audio_file)
         st.write(no_seat_message)
         st.session_state.last_audio = audio_file
         st.session_state.last_message = no_seat_message
 
-    # Display chair status (for debugging or sighted users)
+    # Display chair status with area logs
     if not chairs.empty:
-        st.write("Chair Status:")
+        st.write("Chair Status (Bounding Box Areas):")
         for chair_idx, status in chair_status.items():
             chair = chairs.loc[chair_idx]
-            st.write(f"- Chair at ({int(chair['xmin'])}, {int(chair['ymin'])}): {status} (Confidence: {chair['confidence']:.2f})")
+            area = chair_areas[chair_idx]
+            st.write(f"- Chair at ({int(chair['xmin'])}, {int(chair['ymin'])}): {status}, Area: {int(area)} pixels (Confidence: {chair['confidence']:.2f})")
     else:
         st.write("No chairs detected in the image.")
 
@@ -197,11 +201,12 @@ if picture is not None:
             xmin, ymin, xmax, ymax = int(chair['xmin']), int(chair['ymin']), int(chair['xmax']), int(chair['ymax'])
             color = (0, 0, 255) if status == "Occupied" else (0, 255, 0)  # Red for occupied, green for empty
             cv2.rectangle(img_array, (xmin, ymin), (xmax, ymax), color, 2)
-            cv2.putText(img_array, status, (xmin, ymin - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
+            cv2.putText(img_array, f"{status}, Area: {int(chair_areas[chair_idx])}", (xmin, ymin - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
 
         # Highlight closest empty chair (if any)
         if empty_chairs:
             chair = closest_chair["chair"]
+            direction = get_direction(chair, img_width)
             xmin, ymin, xmax, ymax = int(chair['xmin']), int(chair['ymin']), int(chair['xmax']), int(chair['ymax'])
             cv2.putText(img_array, f"Closest Empty ({direction})", (xmin, ymin - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
 
@@ -211,7 +216,7 @@ if picture is not None:
         st.write("Image visualization skipped due to OpenCV error.")
 
 # Repeat last audio instructions
-if "last_audio" in st.session_state:
+if "last_audio" in st.session_state and st.session_state.last_audio is not None:
     if st.button("Repeat Last Instructions", key="repeat"):
         autoplay_audio(st.session_state.last_audio)
         st.write(st.session_state.last_message)
