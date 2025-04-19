@@ -6,6 +6,7 @@ import numpy as np
 from gtts import gTTS
 import os
 import base64
+import time  # Added to fix NameError
 
 # Debug: Verify cv2 import
 try:
@@ -211,7 +212,7 @@ if picture is not None:
             cv2.putText(img_array, f"Closest Empty ({direction})", (xmin, ymin - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
 
         # Display the image with detections
-        st.image(cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB), caption="Image with Chair Status", use_container_width=True)
+        st.image(cv2.cvtColor(img_array, CV2.COLOR_BGR2RGB), caption="Image with Chair Status", use_container_width=True)
     else:
         st.write("Image visualization skipped due to OpenCV error.")
 
