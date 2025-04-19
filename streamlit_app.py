@@ -57,12 +57,12 @@ def calculate_center_distance(box1, box2):
 
 # Function to estimate distance from bounding box area
 def estimate_distance(area):
-    if area > 2000:
-        return {"range": "near", "steps": 3}
-    elif area > 1000:
+    if area > 12000:
+        return {"range": "near", "steps": 4}
+    elif area > 7000:
         return {"range": "medium", "steps": 7}
     else:
-        return {"range": "far", "steps": 12}
+        return {"range": "far", "steps": 10}
 
 # Function to determine direction (left or right)
 def get_direction(chair, img_width):
