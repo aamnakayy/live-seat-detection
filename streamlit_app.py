@@ -25,7 +25,7 @@ def load_model():
 model = load_model()
 
 # Title of the app
-st.title("Seat Finder for Blind Students")
+st.title("NavigateSolo - Seat Detection")
 
 # Instructions
 st.write("Use your camera to take a picture, and the app will automatically guide you to an empty chair with audio instructions.")
@@ -58,7 +58,7 @@ def calculate_center_distance(box1, box2):
 # Function to estimate distance from bounding box area
 def estimate_distance(area):
     if area > 12000:
-        return {"range": "near", "steps": 4}
+        return {"range": "near", "steps": 3}
     elif area > 7000:
         return {"range": "medium", "steps": 7}
     else:
@@ -94,12 +94,9 @@ def autoplay_audio(audio_file):
 
 # Process the image with YOLOv5
 if picture is not None:
-    # Display the captured image
-    st.image(picture, caption="Captured Image", use_container_width=True)
-
     # Convert Streamlit's BytesIO to PIL Image
     img = Image.open(picture)
-    img_height = img.height  # Get image height for bottom threshold
+    img_height = img.height  # Get image height
     img_width = img.width    # Get image width for direction
 
     # Run inference
@@ -151,17 +148,10 @@ if picture is not None:
             empty_chairs.append({"idx": chair_idx, "area": area, "ymax": ymax, "chair": chair})
 
     if empty_chairs:
-        # Define bottom threshold (within 20% of image height from bottom)
-        bottom_threshold = img_height * 0.8
-        # Filter chairs near bottom
-        bottom_chairs = [c for c in empty_chairs if c["ymax"] >= bottom_threshold]
-        
-        if bottom_chairs:
-            # Select chair with largest ymax (closest to bottom)
-            closest_chair = max(bottom_chairs, key=lambda x: x["ymax"])
-        else:
-            # Fallback: Largest area among chairs with highest ymax
-            closest_chair = max(empty_chairs, key=lambda x: (x["ymax"], x["area"]))
+        # Select chair with highest ymax; if tied, use largest area
+        max_ymax = max(c["ymax"] for c in empty_chairs)
+        tied_chairs = [c for c in empty_chairs if abs(c["ymax"] - max_ymax) < 1]  # Allow 1-pixel tolerance
+        closest_chair = max(tied_chairs, key=lambda x: x["area"])
 
         # Get direction and estimate distance
         direction = get_direction(closest_chair["chair"], img_width)
@@ -183,13 +173,18 @@ if picture is not None:
         st.session_state.last_audio = audio_file
         st.session_state.last_message = no_seat_message
 
-    # Display chair status with area logs
+    # Display chair status with area logs and total counts
     if not chairs.empty:
         st.write("Chair Status (Bounding Box Areas):")
         for chair_idx, status in chair_status.items():
             chair = chairs.loc[chair_idx]
             area = chair_areas[chair_idx]
             st.write(f"- Chair at ({int(chair['xmin'])}, {int(chair['ymin'])}): {status}, Area: {int(area)} pixels (Confidence: {chair['confidence']:.2f})")
+        
+        # Calculate and display total empty and occupied chairs
+        empty_count = sum(1 for status in chair_status.values() if status == "Empty")
+        occupied_count = sum(1 for status in chair_status.values() if status == "Occupied")
+        st.write(f"Total: {empty_count} empty, {occupied_count} occupied")
     else:
         st.write("No chairs detected in the image.")
 
@@ -202,7 +197,7 @@ if picture is not None:
             xmin, ymin, xmax, ymax = int(chair['xmin']), int(chair['ymin']), int(chair['xmax']), int(chair['ymax'])
             color = (0, 0, 255) if status == "Occupied" else (0, 255, 0)  # Red for occupied, green for empty
             cv2.rectangle(img_array, (xmin, ymin), (xmax, ymax), color, 2)
-            cv2.putText(img_array, f"{status}, Area: {int(chair_areas[chair_idx])}", (xmin, ymin - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
+            cv2.putText(img_array, status, (xmin, ymin - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
 
         # Highlight closest empty chair (if any)
         if empty_chairs:
