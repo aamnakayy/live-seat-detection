@@ -60,7 +60,7 @@ def estimate_distance(area):
     if area > 12000:
         return {"range": "near", "steps": 3}
     elif area > 7000:
-        return {"range": "medium", "steps": 7}
+        return {"range": "at a moderate distance", "steps": 7}
     else:
         return {"range": "far", "steps": 10}
 
@@ -74,7 +74,7 @@ def get_direction(chair, img_width):
 
 # Function to generate audio instructions
 def generate_audio(distance_info, direction, area):
-    message = f"The nearest empty seat is {distance_info['range']}, about {distance_info['steps']} steps ahead {direction}. Bounding box area is {int(area)} pixels. Walk straight and take another picture for an update."
+    message = f"The nearest empty seat is {distance_info['range']}, about {distance_info['steps']} steps ahead {direction}. Walk straight and take another picture for an update."
     tts = gTTS(text=message, lang="en")
     audio_file = f"instructions_{int(time.time())}.mp3"
     tts.save(audio_file)
