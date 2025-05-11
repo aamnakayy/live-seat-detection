@@ -7,6 +7,16 @@ from gtts import gTTS
 import os
 import base64
 import time
+import tempfile
+import shutil
+
+# Set page config for better accessibility
+st.set_page_config(
+    page_title="NavigateSolo - Seat Navigation for Blind Students",
+    page_icon="🪑",
+    layout="wide",
+    initial_sidebar_state="collapsed"
+)
 
 # Debug: Verify cv2 import
 try:
@@ -16,9 +26,15 @@ except ImportError as e:
     st.warning(f"OpenCV import failed: {e}. Visualization disabled, but navigation will work.")
     CV2_AVAILABLE = False
 
-# Add custom CSS to increase camera size
+# Add custom CSS for better accessibility
 st.markdown("""
 <style>
+    /* Main container styling */
+    .main {
+        padding: 1rem;
+    }
+    
+    /* Camera widget styling */
     [data-testid="stCameraInput"] {
         width: 100%;
         max-width: 800px;
@@ -28,22 +44,67 @@ st.markdown("""
         width: 200px !important;
         height: 50px !important;
         font-size: 18px !important;
+        background-color: #4CAF50 !important;
+        color: white !important;
+    }
+    
+    /* Loading spinner styling */
+    .stSpinner > div {
+        width: 50px;
+        height: 50px;
+    }
+    
+    /* High contrast mode */
+    .high-contrast {
+        filter: contrast(150%) brightness(120%);
+    }
+    
+    /* Accessibility text */
+    .accessibility-text {
+        font-size: 1.2em;
+        line-height: 1.5;
+    }
+    
+    /* Help button styling */
+    .help-button {
+        position: fixed;
+        bottom: 20px;
+        right: 20px;
+        z-index: 1000;
     }
 </style>
 """, unsafe_allow_html=True)
 
-# Add JavaScript to select back camera
+# Add JavaScript for back camera and error handling
 st.markdown("""
 <script>
     async function setupCamera() {
-        const stream = await navigator.mediaDevices.getUserMedia({
-            video: {
-                facingMode: { exact: "environment" }
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+                video: {
+                    facingMode: { exact: "environment" },
+                    width: { ideal: 1920 },
+                    height: { ideal: 1080 }
+                }
+            });
+            const videoElement = document.querySelector('[data-testid="stCameraInput"] video');
+            if (videoElement) {
+                videoElement.srcObject = stream;
             }
-        });
-        const videoElement = document.querySelector('[data-testid="stCameraInput"] video');
-        if (videoElement) {
-            videoElement.srcObject = stream;
+        } catch (error) {
+            console.error('Camera access error:', error);
+            // Fallback to any available camera
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: true
+                });
+                const videoElement = document.querySelector('[data-testid="stCameraInput"] video');
+                if (videoElement) {
+                    videoElement.srcObject = stream;
+                }
+            } catch (fallbackError) {
+                console.error('Fallback camera access error:', fallbackError);
+            }
         }
     }
     setupCamera();
@@ -58,14 +119,115 @@ def load_model():
 
 model = load_model()
 
-# Title of the app
-st.title("NavigateSolo - Seat Detection")
+# Initialize session state for accessibility settings
+if 'practice_mode' not in st.session_state:
+    st.session_state.practice_mode = False
+if 'haptic_feedback' not in st.session_state:
+    st.session_state.haptic_feedback = True
+if 'voice_guidance' not in st.session_state:
+    st.session_state.voice_guidance = True
+if 'spatial_detail' not in st.session_state:
+    st.session_state.spatial_detail = "high"  # high, medium, low
 
-# Instructions
-st.write("Use your camera to take a picture, and the app will guide you to an empty chair with audio instructions.")
+# Sidebar for accessibility settings
+with st.sidebar:
+    st.title("Accessibility Settings")
+    
+    # Practice mode toggle
+    st.session_state.practice_mode = st.toggle(
+        "Practice Mode",
+        st.session_state.practice_mode,
+        help="In practice mode, the app will provide more detailed feedback and guidance"
+    )
+    
+    # Haptic feedback toggle
+    st.session_state.haptic_feedback = st.toggle(
+        "Haptic Feedback",
+        st.session_state.haptic_feedback,
+        help="Enable vibration patterns for distance feedback"
+    )
+    
+    # Voice guidance toggle
+    st.session_state.voice_guidance = st.toggle(
+        "Voice Guidance",
+        st.session_state.voice_guidance,
+        help="Enable voice instructions"
+    )
+    
+    # Spatial detail level
+    st.session_state.spatial_detail = st.radio(
+        "Spatial Detail Level",
+        ["high", "medium", "low"],
+        index=["high", "medium", "low"].index(st.session_state.spatial_detail),
+        help="Adjust how detailed the spatial descriptions are"
+    )
+    
+    # Help section
+    st.markdown("---")
+    st.markdown("### Quick Help")
+    st.markdown("""
+    - **Take Photo**: Press the large green button
+    - **Repeat Instructions**: Press the button below the instructions
+    - **Practice Mode**: Toggle in settings for detailed guidance
+    - **Voice Command**: Say "help" for assistance
+    - **Emergency Stop**: Say "stop" to pause guidance
+    """)
 
-# Camera input widget with larger size
-picture = st.camera_input("Take a picture", key="camera_input")
+# Add help button
+st.markdown("""
+<div class="help-button">
+    <button onclick="speakHelp()" style="padding: 10px 20px; background-color: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer;">
+        Help
+    </button>
+</div>
+
+<script>
+    function speakHelp() {
+        const helpText = "Welcome to NavigateSolo. To use the app, point your phone's camera and press the take photo button. The app will guide you to the nearest empty seat. You can say 'help' at any time for assistance, or 'stop' to pause guidance.";
+        const utterance = new SpeechSynthesisUtterance(helpText);
+        window.speechSynthesis.speak(utterance);
+    }
+    
+    // Voice command recognition
+    const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    
+    recognition.onresult = function(event) {
+        const command = event.results[event.results.length - 1][0].transcript.toLowerCase();
+        if (command.includes('help')) {
+            speakHelp();
+        } else if (command.includes('stop')) {
+            window.speechSynthesis.cancel();
+        }
+    };
+    
+    recognition.start();
+</script>
+""", unsafe_allow_html=True)
+
+# Title and instructions with accessibility focus
+st.title("NavigateSolo - Seat Navigation")
+st.markdown('<div class="accessibility-text">Welcome to NavigateSolo. Point your phone\'s camera and press the take photo button. I will guide you to the nearest empty seat with clear instructions.</div>', unsafe_allow_html=True)
+
+# Create a temporary directory for audio files
+@st.cache_resource
+def get_temp_dir():
+    temp_dir = tempfile.mkdtemp()
+    return temp_dir
+
+temp_dir = get_temp_dir()
+
+# Cleanup function for temporary files
+def cleanup_temp_files():
+    if os.path.exists(temp_dir):
+        shutil.rmtree(temp_dir)
+        os.makedirs(temp_dir)
+
+# Register cleanup on app start
+if 'temp_cleaned' not in st.session_state:
+    cleanup_temp_files()
+    st.session_state.temp_cleaned = True
 
 # Function to calculate Intersection over Union (IoU)
 def calculate_iou(box1, box2):
@@ -106,12 +268,107 @@ def get_direction(chair, img_width):
     else:
         return "to the right"
 
-# Function to generate audio instructions
-def generate_audio(distance_info, direction, area):
-    message = f"The nearest empty seat is {distance_info['range']}, about {distance_info['steps']} steps ahead {direction}. Walk straight and take another picture for an update."
-    tts = gTTS(text=message, lang="en")
-    audio_file = f"instructions_{int(time.time())}.mp3"
+# Function to get more detailed direction
+def get_detailed_direction(chair, img_width):
+    center_x = (chair['xmin'] + chair['xmax']) / 2
+    relative_position = center_x / img_width
+    
+    if relative_position < 0.3:
+        return "far to the left"
+    elif relative_position < 0.4:
+        return "slightly to the left"
+    elif relative_position > 0.7:
+        return "far to the right"
+    elif relative_position > 0.6:
+        return "slightly to the right"
+    else:
+        return "straight ahead"
+
+# Function to get more detailed distance
+def get_detailed_distance(area, confidence):
+    if area > 12000:
+        return {"range": "very close", "steps": 2, "confidence": "high"}
+    elif area > 10000:
+        return {"range": "close", "steps": 4, "confidence": "high"}
+    elif area > 7000:
+        return {"range": "at a moderate distance", "steps": 7, "confidence": "medium"}
+    elif area > 5000:
+        return {"range": "far", "steps": 10, "confidence": "medium"}
+    else:
+        return {"range": "very far", "steps": 15, "confidence": "low"}
+
+# Function to get detailed spatial description
+def get_spatial_description(chair, img_width, img_height):
+    center_x = (chair['xmin'] + chair['xmax']) / 2
+    center_y = (chair['ymin'] + chair['ymax']) / 2
+    
+    # Horizontal position
+    if center_x < img_width * 0.3:
+        horizontal = "far to your left"
+    elif center_x < img_width * 0.4:
+        horizontal = "to your left"
+    elif center_x > img_width * 0.7:
+        horizontal = "far to your right"
+    elif center_x > img_width * 0.6:
+        horizontal = "to your right"
+    else:
+        horizontal = "straight ahead"
+    
+    # Vertical position (for practice mode)
+    if st.session_state.practice_mode:
+        if center_y < img_height * 0.3:
+            vertical = "in the front of the room"
+        elif center_y > img_height * 0.7:
+            vertical = "in the back of the room"
+        else:
+            vertical = "in the middle of the room"
+        return f"{horizontal}, {vertical}"
+    
+    return horizontal
+
+# Function to get natural distance description
+def get_distance_description(area):
+    if area > 12000:
+        return {"description": "very close to you", "steps": 2, "haptic": "short"}
+    elif area > 10000:
+        return {"description": "close to you", "steps": 4, "haptic": "medium"}
+    elif area > 7000:
+        return {"description": "at a moderate distance", "steps": 7, "haptic": "long"}
+    elif area > 5000:
+        return {"description": "far from you", "steps": 10, "haptic": "very_long"}
+    else:
+        return {"description": "very far from you", "steps": 15, "haptic": "continuous"}
+
+# Modified generate_audio function with natural language
+def generate_audio(distance_info, chair, img_width, img_height):
+    spatial_desc = get_spatial_description(chair, img_width, img_height)
+    
+    if st.session_state.practice_mode:
+        message = f"I can see an empty seat {spatial_desc}. It's {distance_info['description']}, about {distance_info['steps']} steps away. Walk slowly and take another picture when you're ready for an update. Remember, you can say 'help' for assistance or 'stop' to pause guidance."
+    else:
+        message = f"Empty seat {spatial_desc}, {distance_info['description']}. About {distance_info['steps']} steps. Walk slowly and take another picture for an update."
+    
+    tts = gTTS(text=message, lang="en", slow=False)
+    audio_file = os.path.join(temp_dir, f"instructions_{int(time.time())}.mp3")
     tts.save(audio_file)
+    
+    # Generate haptic feedback if enabled
+    if st.session_state.haptic_feedback:
+        haptic_pattern = distance_info['haptic']
+        st.markdown(f"""
+        <script>
+            if (navigator.vibrate) {{
+                navigator.vibrate({{
+                    'short': [100, 100, 100],
+                    'medium': [200, 100, 200],
+                    'long': [300, 100, 300],
+                    'very_long': [400, 100, 400],
+                    'continuous': [500, 100, 500, 100, 500]
+                }}['{haptic_pattern}']);
+            }}
+        </script>
+        """, unsafe_allow_html=True)
+    
     return audio_file, message
 
 # Function to auto-play audio
@@ -126,126 +383,169 @@ def autoplay_audio(audio_file):
     """
     st.markdown(audio_html, unsafe_allow_html=True)
 
-# Process the image with YOLOv5
+# Camera input with error handling
+try:
+    picture = st.camera_input("Take a picture", key="camera_input")
+except Exception as e:
+    st.error("Camera access error. Please ensure camera permissions are granted and try again.")
+    st.stop()
+
+# Process the image with loading state
 if picture is not None:
-    # Convert Streamlit's BytesIO to PIL Image
-    img = Image.open(picture)
-    img_height = img.height  # Get image height
-    img_width = img.width    # Get image width for direction
+    with st.spinner("Processing image..."):
+        try:
+            # Convert Streamlit's BytesIO to PIL Image
+            img = Image.open(picture)
+            img_height = img.height
+            img_width = img.width
 
-    # Run inference
-    results = model(img)
-    detections = results.pandas().xyxy[0]
+            # Run inference with progress
+            progress_bar = st.progress(0)
+            results = model(img)
+            progress_bar.progress(100)
 
-    # Filter detections
-    chairs = detections[detections['name'] == 'chair']
-    people = detections[detections['name'] == 'person']
-    belongings = detections[detections['name'].isin(['backpack', 'handbag', 'suitcase', 'book', 'laptop'])]
-
-    # Classify chairs as empty or occupied
-    chair_status = {}
-    chair_areas = {}
-    for chair_idx, chair in chairs.iterrows():
-        chair_box = [chair['xmin'], chair['ymin'], chair['xmax'], chair['ymax']]
-        area = (chair['xmax'] - chair['xmin']) * (chair['ymax'] - chair['ymin'])
-        chair_areas[chair_idx] = area
-        is_occupied = False
-
-        # Check for person overlap (sitting) or proximity
-        for _, person in people.iterrows():
-            person_box = [person['xmin'], person['ymin'], person['xmax'], person['ymax']]
-            iou = calculate_iou(chair_box, person_box)
-            distance = calculate_center_distance(chair_box, person_box)
-            chair_width = chair_box[2] - chair_box[0]
-            if iou > 0.3 or (distance < chair_width * 1.5 and iou > 0.1):
-                is_occupied = True
-                break
-
-        # Check for belongings overlap
-        if not is_occupied:
-            for _, belonging in belongings.iterrows():
-                belonging_box = [belonging['xmin'], belonging['ymin'], belonging['xmax'], belonging['ymax']]
-                iou = calculate_iou(chair_box, belonging_box)
-                if iou > 0.3:
-                    is_occupied = True
-                    break
-
-        chair_status[chair_idx] = "Occupied" if is_occupied else "Empty"
-
-    # Navigation: Find closest empty chair
-    empty_chairs = []
-    for chair_idx, status in chair_status.items():
-        if status == "Empty":
-            chair = chairs.loc[chair_idx]
-            area = chair_areas[chair_idx]
-            ymax = chair['ymax']
-            empty_chairs.append({"idx": chair_idx, "area": area, "ymax": ymax, "chair": chair})
-
-    if empty_chairs:
-        # Select chair with highest ymax; if tied, use largest area
-        max_ymax = max(c["ymax"] for c in empty_chairs)
-        tied_chairs = [c for c in empty_chairs if abs(c["ymax"] - max_ymax) < 1]  # Allow 1-pixel tolerance
-        closest_chair = max(tied_chairs, key=lambda x: x["area"])
-
-        # Get direction and estimate distance
-        direction = get_direction(closest_chair["chair"], img_width)
-        distance_info = estimate_distance(closest_chair["area"])
-        audio_file, message = generate_audio(distance_info, direction, closest_chair["area"])
-        
-        # Auto-play audio and display text for accessibility
-        autoplay_audio(audio_file)
-        st.write(message)  # For screen readers
-        
-        # Add repeat instructions button right below the message
-        if st.button("Repeat Instructions", key="repeat"):
-            autoplay_audio(audio_file)
-            st.write(message)
+            # Rest of the processing code...
+            detections = results.pandas().xyxy[0]
             
-        st.session_state.last_audio = audio_file
-        st.session_state.last_message = message
-    else:
-        no_seat_message = "No empty seats found. Please try another photo."
-        tts = gTTS(text=no_seat_message, lang="en")
-        audio_file = f"no_seats_{int(time.time())}.mp3"
-        tts.save(audio_file)
-        autoplay_audio(audio_file)
-        st.write(no_seat_message)
-        
-        # Add repeat instructions button right below the message
-        if st.button("Repeat Instructions", key="repeat"):
-            autoplay_audio(audio_file)
-            st.write(no_seat_message)
-            
-        st.session_state.last_audio = audio_file
-        st.session_state.last_message = no_seat_message
+            # Filter detections with confidence threshold
+            confidence_threshold = 0.5
+            chairs = detections[(detections['name'] == 'chair') & (detections['confidence'] > confidence_threshold)]
+            people = detections[(detections['name'] == 'person') & (detections['confidence'] > confidence_threshold)]
+            belongings = detections[(detections['name'].isin(['backpack', 'handbag', 'suitcase', 'book', 'laptop'])) & 
+                                  (detections['confidence'] > confidence_threshold)]
 
-    # Display only total chair count
-    if not chairs.empty:
-        empty_count = sum(1 for status in chair_status.values() if status == "Empty")
-        occupied_count = sum(1 for status in chair_status.values() if status == "Occupied")
-        st.write(f"Detected: {empty_count} empty chairs, {occupied_count} occupied chairs")
-    else:
-        st.write("No chairs detected in the image.")
+            # Classify chairs as empty or occupied
+            chair_status = {}
+            chair_areas = {}
+            for chair_idx, chair in chairs.iterrows():
+                chair_box = [chair['xmin'], chair['ymin'], chair['xmax'], chair['ymax']]
+                area = (chair['xmax'] - chair['xmin']) * (chair['ymax'] - chair['ymin'])
+                chair_areas[chair_idx] = area
+                is_occupied = False
 
-    # Render image with clean visualization (if OpenCV is available)
-    if CV2_AVAILABLE:
-        img_array = np.array(img)  # PIL Image to numpy array (RGB)
-        img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)  # Convert RGB to BGR for cv2
-        
-        # Draw all chairs with clean boxes
-        for chair_idx, status in chair_status.items():
-            chair = chairs.loc[chair_idx]
-            xmin, ymin, xmax, ymax = int(chair['xmin']), int(chair['ymin']), int(chair['xmax']), int(chair['ymax'])
-            color = (0, 0, 255) if status == "Occupied" else (0, 255, 0)  # Red for occupied, green for empty
-            cv2.rectangle(img_array, (xmin, ymin), (xmax, ymax), color, 2)
+                # Check for person overlap (sitting) or proximity
+                for _, person in people.iterrows():
+                    person_box = [person['xmin'], person['ymin'], person['xmax'], person['ymax']]
+                    iou = calculate_iou(chair_box, person_box)
+                    distance = calculate_center_distance(chair_box, person_box)
+                    chair_width = chair_box[2] - chair_box[0]
+                    if iou > 0.3 or (distance < chair_width * 1.5 and iou > 0.1):
+                        is_occupied = True
+                        break
 
-        # Highlight closest empty chair with a thicker box
-        if empty_chairs:
-            chair = closest_chair["chair"]
-            xmin, ymin, xmax, ymax = int(chair['xmin']), int(chair['ymin']), int(chair['xmax']), int(chair['ymax'])
-            cv2.rectangle(img_array, (xmin, ymin), (xmax, ymax), (0, 255, 0), 3)  # Thicker green box for closest empty chair
+                # Check for belongings overlap
+                if not is_occupied:
+                    for _, belonging in belongings.iterrows():
+                        belonging_box = [belonging['xmin'], belonging['ymin'], belonging['xmax'], belonging['ymax']]
+                        iou = calculate_iou(chair_box, belonging_box)
+                        if iou > 0.3:
+                            is_occupied = True
+                            break
 
-        # Display the image with detections
-        st.image(cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB), caption="Chair Detection", use_container_width=True)
-    else:
-        st.write("Image visualization skipped due to OpenCV error.")
+                chair_status[chair_idx] = "Occupied" if is_occupied else "Empty"
+
+            # Navigation: Find closest empty chair
+            empty_chairs = []
+            for chair_idx, status in chair_status.items():
+                if status == "Empty":
+                    chair = chairs.loc[chair_idx]
+                    area = chair_areas[chair_idx]
+                    ymax = chair['ymax']
+                    empty_chairs.append({"idx": chair_idx, "area": area, "ymax": ymax, "chair": chair})
+
+            if empty_chairs:
+                # Select chair with highest ymax; if tied, use largest area
+                max_ymax = max(c["ymax"] for c in empty_chairs)
+                tied_chairs = [c for c in empty_chairs if abs(c["ymax"] - max_ymax) < 1]  # Allow 1-pixel tolerance
+                closest_chair = max(tied_chairs, key=lambda x: x["area"])
+
+                # Get distance information
+                distance_info = get_distance_description(closest_chair["area"])
+                audio_file, message = generate_audio(distance_info, closest_chair["chair"], img_width, img_height)
+                
+                if st.session_state.voice_guidance:
+                    autoplay_audio(audio_file)
+                
+                st.write(message)
+                
+                # Add repeat instructions button with clear labeling
+                if st.button("🔊 Repeat Instructions", key="repeat"):
+                    autoplay_audio(audio_file)
+                    st.write(message)
+                    
+                st.session_state.last_audio = audio_file
+                st.session_state.last_message = message
+            else:
+                no_seat_message = "I don't see any empty seats in the current view. Please try taking another picture from a different angle."
+                if st.session_state.voice_guidance:
+                    tts = gTTS(text=no_seat_message, lang="en", slow=False)
+                    audio_file = os.path.join(temp_dir, f"no_seats_{int(time.time())}.mp3")
+                    tts.save(audio_file)
+                    autoplay_audio(audio_file)
+                
+                st.write(no_seat_message)
+                
+                if st.button("🔊 Repeat Instructions", key="repeat"):
+                    autoplay_audio(audio_file)
+                    st.write(no_seat_message)
+                    
+                st.session_state.last_audio = audio_file
+                st.session_state.last_message = no_seat_message
+
+            # Display only total chair count
+            if not chairs.empty:
+                empty_count = sum(1 for status in chair_status.values() if status == "Empty")
+                occupied_count = sum(1 for status in chair_status.values() if status == "Occupied")
+                st.write(f"Detected: {empty_count} empty chairs, {occupied_count} occupied chairs")
+            else:
+                st.write("No chairs detected in the image.")
+
+            # Modified visualization with high contrast option
+            if CV2_AVAILABLE:
+                img_array = np.array(img)
+                img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
+                
+                # Apply high contrast if enabled
+                if st.session_state.high_contrast:
+                    img_array = cv2.convertScaleAbs(img_array, alpha=1.5, beta=30)
+                
+                # Draw boxes with confidence scores
+                for chair_idx, status in chair_status.items():
+                    chair = chairs.loc[chair_idx]
+                    xmin, ymin, xmax, ymax = int(chair['xmin']), int(chair['ymin']), int(chair['xmax']), int(chair['ymax'])
+                    confidence = chair['confidence']
+                    color = (0, 0, 255) if status == "Occupied" else (0, 255, 0)
+                    cv2.rectangle(img_array, (xmin, ymin), (xmax, ymax), color, 2)
+                    
+                    # Add confidence score for debugging
+                    if st.session_state.debug_mode:
+                        cv2.putText(img_array, f"{confidence:.2f}", (xmin, ymin - 5),
+                                  cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+
+                # Highlight closest empty chair
+                if empty_chairs:
+                    chair = closest_chair["chair"]
+                    xmin, ymin, xmax, ymax = int(chair['xmin']), int(chair['ymin']), int(chair['xmax']), int(chair['ymax'])
+                    cv2.rectangle(img_array, (xmin, ymin), (xmax, ymax), (0, 255, 0), 3)
+
+                # Display with appropriate caption
+                caption = "Chair Detection (High Contrast)" if st.session_state.high_contrast else "Chair Detection"
+                st.image(cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB), caption=caption, use_container_width=True)
+
+        except Exception as e:
+            st.error(f"Error processing image: {str(e)}")
+            st.info("Please try taking another picture. Make sure the image is clear and well-lit.")
+            if st.session_state.debug_mode:
+                st.exception(e)  # Show full error trace in debug mode
+
+# Add debug mode toggle in sidebar
+with st.sidebar:
+    st.markdown("---")
+    st.session_state.debug_mode = st.toggle("Debug Mode", False)
+    if st.session_state.debug_mode:
+        st.markdown("""
+        Debug information:
+        - Shows confidence scores
+        - Displays detailed detection info
+        - Logs processing steps
+        """)
