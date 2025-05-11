@@ -27,9 +27,22 @@ st.markdown("""
         margin: 0 auto;
     }
     [data-testid="stCameraInput"] button {
-        width: 200px !important;
+        width: 100% !important;
         height: 50px !important;
         font-size: 18px !important;
+        margin-top: 10px !important;
+    }
+    /* Style for the switch camera button */
+    [data-testid="stCameraInput"] button[aria-label="Switch camera"] {
+        width: auto !important;
+        position: absolute !important;
+        top: 10px !important;
+        right: 10px !important;
+        background-color: rgba(255, 255, 255, 0.8) !important;
+        border-radius: 50% !important;
+        padding: 8px !important;
+        min-width: 40px !important;
+        height: 40px !important;
     }
     .accessibility-text {
         font-size: 1.2em;
@@ -254,13 +267,14 @@ def generate_audio(distance_info, chair, img_width, img_height):
         st.markdown(f"""
         <script>
             if (navigator.vibrate) {{
-                navigator.vibrate({{
+                const pattern = {{
                     'short': [100, 100, 100],
                     'medium': [200, 100, 200],
                     'long': [300, 100, 300],
                     'very_long': [400, 100, 400],
                     'continuous': [500, 100, 500, 100, 500]
-                }}['{haptic_pattern}']);
+                }}['{haptic_pattern}'];
+                navigator.vibrate(pattern);
             }}
         </script>
         """, unsafe_allow_html=True)
@@ -347,6 +361,24 @@ if picture is not None:
                 if st.button("🔊 Repeat Instructions", key="repeat"):
                     autoplay_audio(audio_file)
                     st.write(message)
+
+                # Trigger haptic feedback
+                if st.session_state.haptic_feedback:
+                    haptic_pattern = distance_info['haptic']
+                    st.markdown(f"""
+                    <script>
+                        if (navigator.vibrate) {{
+                            const pattern = {{
+                                'short': [100, 100, 100],
+                                'medium': [200, 100, 200],
+                                'long': [300, 100, 300],
+                                'very_long': [400, 100, 400],
+                                'continuous': [500, 100, 500, 100, 500]
+                            }}['{haptic_pattern}'];
+                            navigator.vibrate(pattern);
+                        }}
+                    </script>
+                    """, unsafe_allow_html=True)
             else:
                 no_seat_message = "I don't see any empty seats in the current view. Please try taking another picture from a different angle."
                 if st.session_state.voice_guidance:
@@ -361,8 +393,8 @@ if picture is not None:
                     autoplay_audio(audio_file)
                     st.write(no_seat_message)
 
-            # Debug visualization
-            if CV2_AVAILABLE and st.session_state.debug_mode:
+            # Always show visualization if OpenCV is available
+            if CV2_AVAILABLE:
                 img_array = np.array(img)
                 img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
                 
@@ -383,7 +415,7 @@ if picture is not None:
                     xmin, ymin, xmax, ymax = map(int, [chair['xmin'], chair['ymin'], chair['xmax'], chair['ymax']])
                     cv2.rectangle(img_array, (xmin, ymin), (xmax, ymax), (0, 255, 0), 3)
 
-                st.image(cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB), caption="Debug View - Chair Detection", use_container_width=True)
+                st.image(cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB), caption="Chair Detection", use_container_width=True)
 
         except Exception as e:
             st.error(f"Error processing image: {str(e)}")
