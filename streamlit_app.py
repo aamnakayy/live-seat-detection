@@ -16,6 +16,40 @@ except ImportError as e:
     st.warning(f"OpenCV import failed: {e}. Visualization disabled, but navigation will work.")
     CV2_AVAILABLE = False
 
+# Add custom CSS to increase camera size
+st.markdown("""
+<style>
+    [data-testid="stCameraInput"] {
+        width: 100%;
+        max-width: 800px;
+        margin: 0 auto;
+    }
+    [data-testid="stCameraInput"] button {
+        width: 200px !important;
+        height: 50px !important;
+        font-size: 18px !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
+# Add JavaScript to select back camera
+st.markdown("""
+<script>
+    async function setupCamera() {
+        const stream = await navigator.mediaDevices.getUserMedia({
+            video: {
+                facingMode: { exact: "environment" }
+            }
+        });
+        const videoElement = document.querySelector('[data-testid="stCameraInput"] video');
+        if (videoElement) {
+            videoElement.srcObject = stream;
+        }
+    }
+    setupCamera();
+</script>
+""", unsafe_allow_html=True)
+
 # Load pre-trained YOLOv5 model (yolov5m)
 @st.cache_resource
 def load_model():
@@ -30,8 +64,8 @@ st.title("NavigateSolo - Seat Detection")
 # Instructions
 st.write("Use your camera to take a picture, and the app will automatically guide you to an empty chair with audio instructions.")
 
-# Camera input widget
-picture = st.camera_input("Take a picture")
+# Camera input widget with larger size
+picture = st.camera_input("Take a picture", key="camera_input")
 
 # Function to calculate Intersection over Union (IoU)
 def calculate_iou(box1, box2):
