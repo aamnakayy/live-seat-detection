@@ -62,7 +62,7 @@ model = load_model()
 st.title("NavigateSolo - Seat Detection")
 
 # Instructions
-st.write("Use your camera to take a picture, and the app will guide you to an empty chair with audio instructions.")
+st.write("Use your camera to take a picture, and the app will automatically guide you to an empty chair with audio instructions.")
 
 # Camera input widget with larger size
 picture = st.camera_input("Take a picture", key="camera_input")
@@ -195,12 +195,6 @@ if picture is not None:
         # Auto-play audio and display text for accessibility
         autoplay_audio(audio_file)
         st.write(message)  # For screen readers
-        
-        # Add repeat instructions button right below the message
-        if st.button("Repeat Instructions", key="repeat"):
-            autoplay_audio(audio_file)
-            st.write(message)
-            
         st.session_state.last_audio = audio_file
         st.session_state.last_message = message
     else:
@@ -210,42 +204,49 @@ if picture is not None:
         tts.save(audio_file)
         autoplay_audio(audio_file)
         st.write(no_seat_message)
-        
-        # Add repeat instructions button right below the message
-        if st.button("Repeat Instructions", key="repeat"):
-            autoplay_audio(audio_file)
-            st.write(no_seat_message)
-            
         st.session_state.last_audio = audio_file
         st.session_state.last_message = no_seat_message
 
-    # Display only total chair count
+    # Display chair status with area logs and total counts
     if not chairs.empty:
+        st.write("Chair Status (Bounding Box Areas):")
+        for chair_idx, status in chair_status.items():
+            chair = chairs.loc[chair_idx]
+            area = chair_areas[chair_idx]
+            st.write(f"- Chair at ({int(chair['xmin'])}, {int(chair['ymin'])}): {status}, Area: {int(area)} pixels (Confidence: {chair['confidence']:.2f})")
+        
+        # Calculate and display total empty and occupied chairs
         empty_count = sum(1 for status in chair_status.values() if status == "Empty")
         occupied_count = sum(1 for status in chair_status.values() if status == "Occupied")
-        st.write(f"Detected: {empty_count} empty chairs, {occupied_count} occupied chairs")
+        st.write(f"Total: {empty_count} empty, {occupied_count} occupied")
     else:
         st.write("No chairs detected in the image.")
 
-    # Render image with clean visualization (if OpenCV is available)
+    # Render image with custom labels (if OpenCV is available)
     if CV2_AVAILABLE:
         img_array = np.array(img)  # PIL Image to numpy array (RGB)
         img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)  # Convert RGB to BGR for cv2
-        
-        # Draw all chairs with clean boxes
         for chair_idx, status in chair_status.items():
             chair = chairs.loc[chair_idx]
             xmin, ymin, xmax, ymax = int(chair['xmin']), int(chair['ymin']), int(chair['xmax']), int(chair['ymax'])
             color = (0, 0, 255) if status == "Occupied" else (0, 255, 0)  # Red for occupied, green for empty
             cv2.rectangle(img_array, (xmin, ymin), (xmax, ymax), color, 2)
+            cv2.putText(img_array, status, (xmin, ymin - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
 
-        # Highlight closest empty chair with a thicker box
+        # Highlight closest empty chair (if any)
         if empty_chairs:
             chair = closest_chair["chair"]
+            direction = get_direction(chair, img_width)
             xmin, ymin, xmax, ymax = int(chair['xmin']), int(chair['ymin']), int(chair['xmax']), int(chair['ymax'])
-            cv2.rectangle(img_array, (xmin, ymin), (xmax, ymax), (0, 255, 0), 3)  # Thicker green box for closest empty chair
+            cv2.putText(img_array, f"Closest Empty ({direction})", (xmin, ymin - 30), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (0, 255, 0), 2)
 
         # Display the image with detections
-        st.image(cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB), caption="Chair Detection", use_container_width=True)
+        st.image(cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB), caption="Image with Chair Status", use_container_width=True)
     else:
         st.write("Image visualization skipped due to OpenCV error.")
+
+# Repeat last audio instructions
+if "last_audio" in st.session_state and st.session_state.last_audio is not None:
+    if st.button("Repeat Last Instructions", key="repeat"):
+        autoplay_audio(st.session_state.last_audio)
+        st.write(st.session_state.last_message)
