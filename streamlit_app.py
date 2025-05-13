@@ -293,41 +293,7 @@ def get_spatial_description(chair, img_width, img_height):
 
 # Function to get distance description
 def get_distance_description(area):
-# Function to get spatial description
-def get_spatial_description(chair, img_width, img_height):
-    center_x = (chair['xmin'] + chair['xmax']) / 2
-    center_y = (chair['ymin'] + chair['ymax']) / 2
-    
-    # Horizontal position
-    if center_x < img_width * 0.3:
-        horizontal = "far to your left"
-    elif center_x < img_width * 0.4:
-        horizontal = "to your left"
-    elif center_x > img_width * 0.7:
-        horizontal = "far to your right"
-    elif center_x > img_width * 0.6:
-        horizontal = "to your right"
-    else:
-        horizontal = "straight ahead"
-    
-    # Add vertical position in practice mode
-    if st.session_state.practice_mode:
-        if center_y < img_height * 0.3:
-            vertical = "in the front of the room"
-        elif center_y > img_height * 0.7:
-            vertical = "in the back of the room"
-        else:
-            vertical = "in the middle of the room"
-        return f"{horizontal}, {vertical}"
-    
-    return horizontal
-
-# Function to get distance description
-def get_distance_description(area):
     if area > 12000:
-        return {"description": "very close to you", "steps": 2, "haptic": "short"}
-    elif area > 10000:
-        return {"description": "close to you", "steps": 4, "haptic": "medium"}
         return {"description": "very close to you", "steps": 2, "haptic": "short"}
     elif area > 10000:
         return {"description": "close to you", "steps": 4, "haptic": "medium"}
@@ -335,11 +301,7 @@ def get_distance_description(area):
         return {"description": "at a moderate distance", "steps": 7, "haptic": "long"}
     elif area > 5000:
         return {"description": "far from you", "steps": 10, "haptic": "very_long"}
-        return {"description": "at a moderate distance", "steps": 7, "haptic": "long"}
-    elif area > 5000:
-        return {"description": "far from you", "steps": 10, "haptic": "very_long"}
     else:
-        return {"description": "very far from you", "steps": 15, "haptic": "continuous"}
         return {"description": "very far from you", "steps": 15, "haptic": "continuous"}
 
 # Function to generate audio instructions
@@ -353,36 +315,7 @@ def generate_audio(distance_info, chair, img_width, img_height):
     
     tts = gTTS(text=message, lang="en", slow=False)
     audio_file = os.path.join(temp_dir, f"instructions_{int(time.time())}.mp3")
-def generate_audio(distance_info, chair, img_width, img_height):
-    spatial_desc = get_spatial_description(chair, img_width, img_height)
-    
-    if st.session_state.practice_mode:
-        message = f"I can see an empty seat {spatial_desc}. It's {distance_info['description']}, about {distance_info['steps']} steps away. Walk slowly and take another picture when you're ready for an update. Remember, you can say 'help' for assistance or 'stop' to pause guidance."
-    else:
-        message = f"Empty seat {spatial_desc}, {distance_info['description']}. About {distance_info['steps']} steps. Walk slowly and take another picture for an update."
-    
-    tts = gTTS(text=message, lang="en", slow=False)
-    audio_file = os.path.join(temp_dir, f"instructions_{int(time.time())}.mp3")
     tts.save(audio_file)
-    
-    # Generate haptic feedback if enabled
-    if st.session_state.haptic_feedback:
-        haptic_pattern = distance_info['haptic']
-        st.markdown(f"""
-        <script>
-            if (navigator.vibrate) {{
-                const pattern = {{
-                    'short': [100, 100, 100],
-                    'medium': [200, 100, 200],
-                    'long': [300, 100, 300],
-                    'very_long': [400, 100, 400],
-                    'continuous': [500, 100, 500, 100, 500]
-                }}['{haptic_pattern}'];
-                navigator.vibrate(pattern);
-            }}
-        </script>
-        """, unsafe_allow_html=True)
-    
     
     # Generate haptic feedback if enabled
     if st.session_state.haptic_feedback:
@@ -424,14 +357,6 @@ except Exception as e:
     st.stop()
 
 # Process the image
-# Camera input with error handling
-try:
-    picture = st.camera_input("Take a picture", key="camera_input")
-except Exception as e:
-    st.error("Camera access error. Please ensure camera permissions are granted and try again.")
-    st.stop()
-
-# Process the image
 if picture is not None:
     with st.spinner("Processing image..."):
         try:
@@ -455,28 +380,6 @@ if picture is not None:
                 chair_box = [chair['xmin'], chair['ymin'], chair['xmax'], chair['ymax']]
                 area = (chair['xmax'] - chair['xmin']) * (chair['ymax'] - chair['ymin'])
                 is_occupied = False
-    with st.spinner("Processing image..."):
-        try:
-            # Convert image and run inference
-            img = Image.open(picture)
-            img_height, img_width = img.height, img.width
-            
-            results = model(img)
-            detections = results.pandas().xyxy[0]
-            
-            # Filter detections with confidence threshold
-            confidence_threshold = 0.5
-            chairs = detections[(detections['name'] == 'chair') & (detections['confidence'] > confidence_threshold)]
-            people = detections[(detections['name'] == 'person') & (detections['confidence'] > confidence_threshold)]
-            belongings = detections[(detections['name'].isin(['backpack', 'handbag', 'suitcase', 'book', 'laptop'])) & 
-                                  (detections['confidence'] > confidence_threshold)]
-
-            # Find empty chairs
-            empty_chairs = []
-            for _, chair in chairs.iterrows():
-                chair_box = [chair['xmin'], chair['ymin'], chair['xmax'], chair['ymax']]
-                area = (chair['xmax'] - chair['xmin']) * (chair['ymax'] - chair['ymin'])
-                is_occupied = False
 
                 # Check for person overlap
                 for _, person in people.iterrows():
@@ -485,22 +388,7 @@ if picture is not None:
                         chair_box[1] < person_box[3] and chair_box[3] > person_box[1]):
                         is_occupied = True
                         break
-                # Check for person overlap
-                for _, person in people.iterrows():
-                    person_box = [person['xmin'], person['ymin'], person['xmax'], person['ymax']]
-                    if (chair_box[0] < person_box[2] and chair_box[2] > person_box[0] and
-                        chair_box[1] < person_box[3] and chair_box[3] > person_box[1]):
-                        is_occupied = True
-                        break
 
-                # Check for belongings
-                if not is_occupied:
-                    for _, belonging in belongings.iterrows():
-                        belonging_box = [belonging['xmin'], belonging['ymin'], belonging['xmax'], belonging['ymax']]
-                        if (chair_box[0] < belonging_box[2] and chair_box[2] > belonging_box[0] and
-                            chair_box[1] < belonging_box[3] and chair_box[3] > belonging_box[1]):
-                            is_occupied = True
-                            break
                 # Check for belongings
                 if not is_occupied:
                     for _, belonging in belongings.iterrows():
@@ -529,23 +417,6 @@ if picture is not None:
                 if st.button("🔊 Repeat Instructions", key="repeat"):
                     autoplay_audio(audio_file)
 
-                # Trigger haptic feedback
-                if st.session_state.haptic_feedback:
-                    haptic_pattern = distance_info['haptic']
-                    st.markdown(f"""
-                    <script>
-                        if (navigator.vibrate) {{
-                            const pattern = {{
-                                'short': [100, 100, 100],
-                                'medium': [200, 100, 200],
-                                'long': [300, 100, 300],
-                                'very_long': [400, 100, 400],
-                                'continuous': [500, 100, 500, 100, 500]
-                            }}['{haptic_pattern}'];
-                            navigator.vibrate(pattern);
-                        }}
-                    </script>
-                    """, unsafe_allow_html=True)
             else:
                 no_seat_message = "No empty seats found in the current view. Please try taking another picture from a different angle."
                 if st.session_state.voice_guidance:
@@ -581,13 +452,6 @@ if picture is not None:
                     xmin, ymin, xmax, ymax = map(int, [chair['xmin'], chair['ymin'], chair['xmax'], chair['ymax']])
                     cv2.rectangle(img_array, (xmin, ymin), (xmax, ymax), (0, 255, 0), 3)
 
-                st.image(cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB), caption="Chair Detection", use_container_width=True)
-
-        except Exception as e:
-            st.error(f"Error processing image: {str(e)}")
-            st.info("Please try taking another picture. Make sure the image is clear and well-lit.")
-            if st.session_state.debug_mode:
-                st.exception(e)
                 st.image(cv2.cvtColor(img_array, cv2.COLOR_BGR2RGB), caption="Chair Detection", use_container_width=True)
 
         except Exception as e:
