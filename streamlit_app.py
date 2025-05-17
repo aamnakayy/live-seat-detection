@@ -258,6 +258,35 @@ st.markdown("""
 </script>
 """, unsafe_allow_html=True)
 
+# Add JavaScript for haptic feedback and audio control
+st.markdown("""
+<script>
+    // Function to handle haptic feedback
+    function triggerHapticFeedback(pattern) {
+        if (navigator.vibrate) {
+            const patterns = {
+                'short': [100, 100, 100],
+                'medium': [200, 100, 200],
+                'long': [300, 100, 300],
+                'very_long': [400, 100, 400],
+                'continuous': [500, 100, 500, 100, 500]
+            };
+            navigator.vibrate(patterns[pattern]);
+        }
+    }
+
+    // Function to play audio
+    function playAudio(base64Audio) {
+        const audio = new Audio('data:audio/mp3;base64,' + base64Audio);
+        audio.play();
+    }
+
+    // Make functions available globally
+    window.triggerHapticFeedback = triggerHapticFeedback;
+    window.playAudio = playAudio;
+</script>
+""", unsafe_allow_html=True)
+
 # Title and instructions
 st.title("Seat Navigation")
 st.markdown('<div class="accessibility-text">Point your phone\'s camera ahead and press the Take Photo button. I will guide you to the nearest empty seat with clear instructions.</div>', unsafe_allow_html=True)
@@ -322,16 +351,7 @@ def generate_audio(distance_info, chair, img_width, img_height):
         haptic_pattern = distance_info['haptic']
         st.markdown(f"""
         <script>
-            if (navigator.vibrate) {{
-                const pattern = {{
-                    'short': [100, 100, 100],
-                    'medium': [200, 100, 200],
-                    'long': [300, 100, 300],
-                    'very_long': [400, 100, 400],
-                    'continuous': [500, 100, 500, 100, 500]
-                }}['{haptic_pattern}'];
-                navigator.vibrate(pattern);
-            }}
+            window.triggerHapticFeedback('{haptic_pattern}');
         </script>
         """, unsafe_allow_html=True)
     
@@ -343,9 +363,9 @@ def autoplay_audio(audio_file):
         audio_bytes = f.read()
     b64 = base64.b64encode(audio_bytes).decode()
     audio_html = f"""
-    <audio autoplay>
-        <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
-    </audio>
+    <script>
+        window.playAudio('{b64}');
+    </script>
     """
     st.markdown(audio_html, unsafe_allow_html=True)
 
@@ -413,8 +433,8 @@ if picture is not None:
                 
                 st.write(message)
                 
-                # Add repeat instructions button
-                if st.button("🔊 Repeat Instructions", key="repeat"):
+                # Add repeat instructions button with dynamic key
+                if st.button("🔊 Repeat Instructions", key=f"repeat_{int(time.time())}"):
                     autoplay_audio(audio_file)
 
             else:
@@ -427,7 +447,8 @@ if picture is not None:
                 
                 st.write(no_seat_message)
                 
-                if st.button("🔊 Repeat Instructions", key="repeat"):
+                # Add repeat instructions button with dynamic key
+                if st.button("🔊 Repeat Instructions", key=f"repeat_no_seats_{int(time.time())}"):
                     autoplay_audio(audio_file)
 
             # Always show visualization if OpenCV is available
