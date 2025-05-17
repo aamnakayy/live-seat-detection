@@ -209,7 +209,7 @@ def generate_audio(distance_info, chair, img_width, img_height):
     spatial_desc = get_spatial_description(chair, img_width, img_height)
     
     if st.session_state.practice_mode:
-        message = f"I can see an empty seat {spatial_desc}. It's {distance_info['description']}, about {distance_info['steps']} steps away. Walk slowly and take another picture when you're ready for an update. Remember, you can say 'help' for assistance or 'stop' to pause guidance."
+        message = f"I can see an empty seat {spatial_desc}. It's {distance_info['description']}, about {distance_info['steps']} steps away. Walk slowly and take another picture when you're ready for an update."
     else:
         message = f"Empty seat {spatial_desc}, {distance_info['description']}. About {distance_info['steps']} steps. Walk slowly and take another picture for an update."
     
@@ -253,7 +253,7 @@ if picture is not None:
             confidence_threshold = 0.5
             chairs = detections[(detections['name'] == 'chair') & (detections['confidence'] > confidence_threshold)]
             people = detections[(detections['name'] == 'person') & (detections['confidence'] > confidence_threshold)]
-            belongings = detections[(detections['name'].isin(['backpack', 'handbag', 'suitcase', 'book', 'laptop'])) & 
+            belongings = detections[(detections['name'].isin(['backpack', 'handbag', 'bottle', 'suitcase', 'book', 'laptop'])) & 
                                   (detections['confidence'] > confidence_threshold)]
 
             # Find empty chairs
@@ -300,7 +300,7 @@ if picture is not None:
                 st.write(message)
                 
                 # Add repeat instructions button
-                if st.button("🔊 Repeat Instructions"):
+                if st.button("🔊 Repeat Instructions", key="repeat_instructions"):
                     if st.session_state.last_audio_file:
                         autoplay_audio(st.session_state.last_audio_file)
 
@@ -318,7 +318,7 @@ if picture is not None:
                 st.write(no_seat_message)
                 
                 # Add repeat instructions button
-                if st.button("🔊 Repeat Instructions"):
+                if st.button("🔊 Repeat Instructions", key="repeat_no_seats"):
                     if st.session_state.last_audio_file:
                         autoplay_audio(st.session_state.last_audio_file)
 
