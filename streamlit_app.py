@@ -95,6 +95,10 @@ if 'voice_guidance' not in st.session_state:
     st.session_state.voice_guidance = True
 if 'debug_mode' not in st.session_state:
     st.session_state.debug_mode = False
+if 'last_audio_file' not in st.session_state:
+    st.session_state.last_audio_file = None
+if 'last_message' not in st.session_state:
+    st.session_state.last_message = None
 
 # Sidebar for accessibility settings
 with st.sidebar:
@@ -316,8 +320,48 @@ if picture is not None:
                 if not is_occupied:
                     empty_chairs.append({"chair": chair, "area": area, "ymax": chair['ymax']})
 
+            # Provide guidance for closest empty chair
+            if empty_chairs:
+                # Select chair with highest ymax (closest to camera)
+                closest_chair = max(empty_chairs, key=lambda x: x["ymax"])
+                distance_info = get_distance_description(closest_chair["area"])
+                audio_file, message = generate_audio(distance_info, closest_chair["chair"], img_width, img_height)
+                
+                # Store the audio file and message in session state
+                st.session_state.last_audio_file = audio_file
+                st.session_state.last_message = message
+                
+                if st.session_state.voice_guidance:
+                    autoplay_audio(audio_file)
+                
+                st.write(message)
+                
+                # Add repeat instructions button
+                if st.button("🔊 Repeat Instructions"):
+                    if st.session_state.last_audio_file:
+                        autoplay_audio(st.session_state.last_audio_file)
+
+            else:
+                no_seat_message = "No empty seats found in the current view. Please try taking another picture from a different angle."
+                if st.session_state.voice_guidance:
+                    tts = gTTS(text=no_seat_message, lang="en", slow=False)
+                    audio_file = os.path.join(temp_dir, f"no_seats_{int(time.time())}.mp3")
+                    tts.save(audio_file)
+                    # Store the audio file and message in session state
+                    st.session_state.last_audio_file = audio_file
+                    st.session_state.last_message = no_seat_message
+                    autoplay_audio(audio_file)
+                
+                st.write(no_seat_message)
+                
+                # Add repeat instructions button
+                if st.button("🔊 Repeat Instructions"):
+                    if st.session_state.last_audio_file:
+                        autoplay_audio(st.session_state.last_audio_file)
+
             # Show debug information if debug mode is enabled
             if st.session_state.debug_mode:
+                st.markdown("---")
                 st.markdown("### Debug Information")
                 st.markdown(f"**Total Chairs Detected:** {len(chairs)}")
                 st.markdown(f"**Empty Chairs:** {len(empty_chairs)}")
@@ -336,38 +380,10 @@ if picture is not None:
                     - Bounding Box: ({chair['xmin']:.1f}, {chair['ymin']:.1f}) to ({chair['xmax']:.1f}, {chair['ymax']:.1f})
                     """)
 
-            # Provide guidance for closest empty chair
-            if empty_chairs:
-                # Select chair with highest ymax (closest to camera)
-                closest_chair = max(empty_chairs, key=lambda x: x["ymax"])
-                distance_info = get_distance_description(closest_chair["area"])
-                audio_file, message = generate_audio(distance_info, closest_chair["chair"], img_width, img_height)
-                
-                if st.session_state.voice_guidance:
-                    autoplay_audio(audio_file)
-                
-                st.write(message)
-                
-                # Add repeat instructions button with dynamic key
-                if st.button("🔊 Repeat Instructions", key=f"repeat_{int(time.time())}"):
-                    autoplay_audio(audio_file)
-
-            else:
-                no_seat_message = "No empty seats found in the current view. Please try taking another picture from a different angle."
-                if st.session_state.voice_guidance:
-                    tts = gTTS(text=no_seat_message, lang="en", slow=False)
-                    audio_file = os.path.join(temp_dir, f"no_seats_{int(time.time())}.mp3")
-                    tts.save(audio_file)
-                    autoplay_audio(audio_file)
-                
-                st.write(no_seat_message)
-                
-                # Add repeat instructions button with dynamic key
-                if st.button("🔊 Repeat Instructions", key=f"repeat_no_seats_{int(time.time())}"):
-                    autoplay_audio(audio_file)
-
             # Always show visualization if OpenCV is available
             if CV2_AVAILABLE:
+                st.markdown("---")
+                st.markdown("### Visualization")
                 img_array = np.array(img)
                 img_array = cv2.cvtColor(img_array, cv2.COLOR_RGB2BGR)
                 
