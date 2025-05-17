@@ -21,7 +21,6 @@ st.set_page_config(
 st.markdown("""
 <style>
     .main { padding: 1rem; }
-    .main { padding: 1rem; }
     [data-testid="stCameraInput"] {
         width: 100%;
         max-width: 800px;
@@ -29,32 +28,8 @@ st.markdown("""
     }
     [data-testid="stCameraInput"] button {
         width: 100% !important;
-        width: 100% !important;
         height: 50px !important;
         font-size: 18px !important;
-        margin-top: 10px !important;
-    }
-    /* Style for the switch camera button */
-    [data-testid="stCameraInput"] button[aria-label="Switch camera"] {
-        width: auto !important;
-        position: absolute !important;
-        top: 10px !important;
-        right: 10px !important;
-        background-color: rgba(255, 255, 255, 0.8) !important;
-        border-radius: 50% !important;
-        padding: 8px !important;
-        min-width: 40px !important;
-        height: 40px !important;
-    }
-    .accessibility-text {
-        font-size: 1.2em;
-        line-height: 1.5;
-    }
-    .help-button {
-        position: fixed;
-        bottom: 20px;
-        right: 20px;
-        z-index: 1000;
         margin-top: 10px !important;
     }
     /* Style for the switch camera button */
@@ -116,8 +91,6 @@ if 'temp_cleaned' not in st.session_state:
     st.session_state.temp_cleaned = True
 if 'practice_mode' not in st.session_state:
     st.session_state.practice_mode = False
-if 'haptic_feedback' not in st.session_state:
-    st.session_state.haptic_feedback = True
 if 'voice_guidance' not in st.session_state:
     st.session_state.voice_guidance = True
 if 'debug_mode' not in st.session_state:
@@ -130,11 +103,6 @@ with st.sidebar:
         "Practice Mode",
         st.session_state.practice_mode,
         help="In practice mode, the app will provide more detailed feedback and guidance"
-    )
-    st.session_state.haptic_feedback = st.toggle(
-        "Haptic Feedback",
-        st.session_state.haptic_feedback,
-        help="Enable vibration patterns for distance feedback"
     )
     st.session_state.voice_guidance = st.toggle(
         "Voice Guidance",
@@ -156,39 +124,7 @@ with st.sidebar:
         st.session_state.debug_mode = True
         st.markdown("Debug information enabled")
 
-# Add help button with voice commands
-st.markdown("""
-<div class="help-button">
-    <button onclick="speakHelp()" style="padding: 10px 20px; background-color: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer;">
-        Help
-    </button>
-</div>
-
-<script>
-    function speakHelp() {
-        const helpText = "Point your phone's camera ahead and press the Take Photo button. The app will guide you to the nearest empty seat. You can say 'help' at any time for assistance, or 'stop' to pause guidance.";
-        const utterance = new SpeechSynthesisUtterance(helpText);
-        window.speechSynthesis.speak(utterance);
-    }
-    
-    const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    
-    recognition.onresult = function(event) {
-        const command = event.results[event.results.length - 1][0].transcript.toLowerCase();
-        if (command.includes('help')) {
-            speakHelp();
-        } else if (command.includes('stop')) {
-            window.speechSynthesis.cancel();
-        }
-    };
-    
-    recognition.start();
-</script>
-""", unsafe_allow_html=True)
-
-# Add JavaScript for back camera
+# Add JavaScript for back camera and voice commands
 st.markdown("""
 <script>
     async function setupCamera() {
@@ -220,71 +156,39 @@ st.markdown("""
             }
         }
     }
-    // Call setupCamera when the page loads
-    window.addEventListener('load', setupCamera);
-    // Also try to set up camera immediately
-        try {
-            const stream = await navigator.mediaDevices.getUserMedia({
-                video: {
-                    facingMode: { exact: "environment" },
-                    width: { ideal: 1920 },
-                    height: { ideal: 1080 }
-                }
-            });
-            const videoElement = document.querySelector('[data-testid="stCameraInput"] video');
-            if (videoElement) {
-                videoElement.srcObject = stream;
-            }
-        } catch (error) {
-            console.error('Camera access error:', error);
-            // Fallback to any available camera
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({
-                    video: true
-                });
-                const videoElement = document.querySelector('[data-testid="stCameraInput"] video');
-                if (videoElement) {
-                    videoElement.srcObject = stream;
-                }
-            } catch (fallbackError) {
-                console.error('Fallback camera access error:', fallbackError);
-            }
+
+    function speakHelp() {
+        const helpText = "Point your phone's camera ahead and press the Take Photo button. The app will guide you to the nearest empty seat. You can say 'help' at any time for assistance, or 'stop' to pause guidance.";
+        const utterance = new SpeechSynthesisUtterance(helpText);
+        window.speechSynthesis.speak(utterance);
+    }
+    
+    // Set up voice recognition
+    const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+    recognition.continuous = true;
+    recognition.interimResults = true;
+    
+    recognition.onresult = function(event) {
+        const command = event.results[event.results.length - 1][0].transcript.toLowerCase();
+        if (command.includes('help')) {
+            speakHelp();
+        } else if (command.includes('stop')) {
+            window.speechSynthesis.cancel();
         }
-    }
-    // Call setupCamera when the page loads
-    window.addEventListener('load', setupCamera);
-    // Also try to set up camera immediately
-    setupCamera();
+    };
+    
+    // Initialize camera and voice recognition
+    window.addEventListener('load', () => {
+        setupCamera();
+        recognition.start();
+    });
 </script>
-""", unsafe_allow_html=True)
 
-# Add JavaScript for haptic feedback and audio control
-st.markdown("""
-<script>
-    // Function to handle haptic feedback
-    function triggerHapticFeedback(pattern) {
-        if (navigator.vibrate) {
-            const patterns = {
-                'short': [100, 100, 100],
-                'medium': [200, 100, 200],
-                'long': [300, 100, 300],
-                'very_long': [400, 100, 400],
-                'continuous': [500, 100, 500, 100, 500]
-            };
-            navigator.vibrate(patterns[pattern]);
-        }
-    }
-
-    // Function to play audio
-    function playAudio(base64Audio) {
-        const audio = new Audio('data:audio/mp3;base64,' + base64Audio);
-        audio.play();
-    }
-
-    // Make functions available globally
-    window.triggerHapticFeedback = triggerHapticFeedback;
-    window.playAudio = playAudio;
-</script>
+<div class="help-button">
+    <button onclick="speakHelp()" style="padding: 10px 20px; background-color: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer;">
+        Help
+    </button>
+</div>
 """, unsafe_allow_html=True)
 
 # Title and instructions
@@ -323,15 +227,15 @@ def get_spatial_description(chair, img_width, img_height):
 # Function to get distance description
 def get_distance_description(area):
     if area > 12000:
-        return {"description": "very close to you", "steps": 2, "haptic": "short"}
+        return {"description": "very close to you", "steps": 2}
     elif area > 10000:
-        return {"description": "close to you", "steps": 4, "haptic": "medium"}
+        return {"description": "close to you", "steps": 4}
     elif area > 7000:
-        return {"description": "at a moderate distance", "steps": 7, "haptic": "long"}
+        return {"description": "at a moderate distance", "steps": 7}
     elif area > 5000:
-        return {"description": "far from you", "steps": 10, "haptic": "very_long"}
+        return {"description": "far from you", "steps": 10}
     else:
-        return {"description": "very far from you", "steps": 15, "haptic": "continuous"}
+        return {"description": "very far from you", "steps": 15}
 
 # Function to generate audio instructions
 def generate_audio(distance_info, chair, img_width, img_height):
@@ -346,15 +250,6 @@ def generate_audio(distance_info, chair, img_width, img_height):
     audio_file = os.path.join(temp_dir, f"instructions_{int(time.time())}.mp3")
     tts.save(audio_file)
     
-    # Generate haptic feedback if enabled
-    if st.session_state.haptic_feedback:
-        haptic_pattern = distance_info['haptic']
-        st.markdown(f"""
-        <script>
-            window.triggerHapticFeedback('{haptic_pattern}');
-        </script>
-        """, unsafe_allow_html=True)
-    
     return audio_file, message
 
 # Function to auto-play audio
@@ -363,9 +258,9 @@ def autoplay_audio(audio_file):
         audio_bytes = f.read()
     b64 = base64.b64encode(audio_bytes).decode()
     audio_html = f"""
-    <script>
-        window.playAudio('{b64}');
-    </script>
+    <audio autoplay>
+        <source src="data:audio/mp3;base64,{b64}" type="audio/mp3">
+    </audio>
     """
     st.markdown(audio_html, unsafe_allow_html=True)
 
@@ -420,6 +315,26 @@ if picture is not None:
 
                 if not is_occupied:
                     empty_chairs.append({"chair": chair, "area": area, "ymax": chair['ymax']})
+
+            # Show debug information if debug mode is enabled
+            if st.session_state.debug_mode:
+                st.markdown("### Debug Information")
+                st.markdown(f"**Total Chairs Detected:** {len(chairs)}")
+                st.markdown(f"**Empty Chairs:** {len(empty_chairs)}")
+                st.markdown(f"**Occupied Chairs:** {len(chairs) - len(empty_chairs)}")
+                
+                st.markdown("#### Chair Details:")
+                for idx, chair in chairs.iterrows():
+                    area = (chair['xmax'] - chair['xmin']) * (chair['ymax'] - chair['ymin'])
+                    is_empty = any(c["chair"].equals(chair) for c in empty_chairs)
+                    status = "Empty" if is_empty else "Occupied"
+                    st.markdown(f"""
+                    **Chair {idx + 1}**:
+                    - Status: {status}
+                    - Area: {area:.2f} pixels²
+                    - Confidence: {chair['confidence']:.2f}
+                    - Bounding Box: ({chair['xmin']:.1f}, {chair['ymin']:.1f}) to ({chair['xmax']:.1f}, {chair['ymax']:.1f})
+                    """)
 
             # Provide guidance for closest empty chair
             if empty_chairs:
