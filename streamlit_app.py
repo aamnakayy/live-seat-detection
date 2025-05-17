@@ -48,12 +48,6 @@ st.markdown("""
         font-size: 1.2em;
         line-height: 1.5;
     }
-    .help-button {
-        position: fixed;
-        bottom: 20px;
-        right: 20px;
-        z-index: 1000;
-    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -120,15 +114,13 @@ with st.sidebar:
     - **Take Photo**: Press the large green button
     - **Repeat Instructions**: Press the button below the instructions
     - **Practice Mode**: Toggle in settings for detailed guidance
-    - **Voice Command**: Say "help" for assistance
-    - **Emergency Stop**: Say "stop" to pause guidance
     """)
     
     if st.toggle("Debug Mode", st.session_state.debug_mode):
         st.session_state.debug_mode = True
         st.markdown("Debug information enabled")
 
-# Add JavaScript for back camera and voice commands
+# Add JavaScript for back camera
 st.markdown("""
 <script>
     async function setupCamera() {
@@ -161,38 +153,9 @@ st.markdown("""
         }
     }
 
-    function speakHelp() {
-        const helpText = "Point your phone's camera ahead and press the Take Photo button. The app will guide you to the nearest empty seat. You can say 'help' at any time for assistance, or 'stop' to pause guidance.";
-        const utterance = new SpeechSynthesisUtterance(helpText);
-        window.speechSynthesis.speak(utterance);
-    }
-    
-    // Set up voice recognition
-    const recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    
-    recognition.onresult = function(event) {
-        const command = event.results[event.results.length - 1][0].transcript.toLowerCase();
-        if (command.includes('help')) {
-            speakHelp();
-        } else if (command.includes('stop')) {
-            window.speechSynthesis.cancel();
-        }
-    };
-    
-    // Initialize camera and voice recognition
-    window.addEventListener('load', () => {
-        setupCamera();
-        recognition.start();
-    });
+    // Initialize camera
+    window.addEventListener('load', setupCamera);
 </script>
-
-<div class="help-button">
-    <button onclick="speakHelp()" style="padding: 10px 20px; background-color: #4CAF50; color: white; border: none; border-radius: 5px; cursor: pointer;">
-        Help
-    </button>
-</div>
 """, unsafe_allow_html=True)
 
 # Title and instructions
