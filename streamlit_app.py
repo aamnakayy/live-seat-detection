@@ -111,7 +111,7 @@ with st.sidebar:
     st.markdown("---")
     st.markdown("### Quick Help")
     st.markdown("""
-    - **Take Photo**: Press the large green button
+    - **Take Photo**: Press the large button beneath the camera window
     - **Repeat Instructions**: Press the button below the instructions
     - **Practice Mode**: Toggle in settings for detailed guidance
     """)
